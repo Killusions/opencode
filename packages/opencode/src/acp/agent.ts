@@ -388,6 +388,19 @@ export namespace ACP {
 
         this.setupEventSubscriptions(state)
 
+        // Send initial prompt if provided (don't await - let it stream via events)
+        if (this.config.initialPrompt) {
+          this.sdk.session
+            .prompt({
+              sessionID: sessionId,
+              directory,
+              message: this.config.initialPrompt,
+            })
+            .catch((err) => {
+              log.error("failed to send initial prompt", { error: err, sessionId })
+            })
+        }
+
         return {
           sessionId,
           models: load.models,

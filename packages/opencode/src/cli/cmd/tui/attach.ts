@@ -1,5 +1,6 @@
 import { cmd } from "../cmd"
 import { tui } from "./app"
+import { iife } from "@/util/iife"
 
 export const AttachCommand = cmd({
   command: "attach <url>",
@@ -19,12 +20,26 @@ export const AttachCommand = cmd({
         alias: ["s"],
         type: "string",
         describe: "session id to continue",
+      })
+      .option("prompt", {
+        type: "string",
+        describe: "prompt to use",
       }),
   handler: async (args) => {
     if (args.dir) process.chdir(args.dir)
+
+    const prompt = await iife(async () => {
+      const piped = !process.stdin.isTTY ? await Bun.stdin.text() : undefined
+      if (!args.prompt) return piped
+      return piped ? piped + "\n" + args.prompt : args.prompt
+    })
+
     await tui({
       url: args.url,
-      args: { sessionID: args.session },
+      args: {
+        sessionID: args.session,
+        prompt,
+      },
       directory: args.dir ? process.cwd() : undefined,
     })
   },
