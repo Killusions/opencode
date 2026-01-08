@@ -1,6 +1,7 @@
 import { cmd } from "../cmd"
 import { tui } from "./app"
 import { iife } from "@/util/iife"
+import { parseSessionUrl } from "@/util/parse-session-url"
 
 export const AttachCommand = cmd({
   command: "attach <url>",
@@ -9,7 +10,7 @@ export const AttachCommand = cmd({
     yargs
       .positional("url", {
         type: "string",
-        describe: "http://localhost:4096",
+        describe: "http://localhost:4096 or http://localhost:4096/ses_xxx/session/ses_xxx",
         demandOption: true,
       })
       .option("dir", {
@@ -34,10 +35,12 @@ export const AttachCommand = cmd({
       return piped ? piped + "\n" + args.prompt : args.prompt
     })
 
+    const { baseUrl, sessionId } = parseSessionUrl(args.url)
+
     await tui({
-      url: args.url,
+      url: baseUrl,
       args: {
-        sessionID: args.session,
+        sessionID: args.session ?? sessionId,
         prompt,
       },
       directory: args.dir ? process.cwd() : undefined,
