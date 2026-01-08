@@ -2,25 +2,59 @@ import { Server } from "../../server/server"
 import { cmd } from "./cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
+import { Hono } from "hono"
+import { proxy } from "hono/proxy"
 
 export const ServeCommand = cmd({
   command: "serve",
   builder: (yargs) => {
-    return withNetworkOptions(yargs).option("prompt", {
-      describe: "prompt to use",
-      type: "string",
-    })
+    return withNetworkOptions(yargs)
+      .option("prompt", {
+        describe: "prompt to use",
+        type: "string",
+      })
+      .option("attach", {
+        describe: "attach to an existing OpenCode server",
+        type: "string",
+      })
   },
   describe: "starts a headless opencode server",
   handler: async (args) => {
-    const opts = await resolveNetworkOptions(args)
-    const server = Server.listen(opts)
-    const baseUrl = `http://${server.hostname}:${server.port}`
+    let server: ReturnType<typeof Server.listen> | Awaited<ReturnType<typeof Bun.serve>> | undefined
+    let baseUrl: string
+    let remoteUrl: string | undefined
+
+    if (args.attach) {
+      remoteUrl = args.attach
+      const opts = await resolveNetworkOptions(args)
+
+      // Create a proxy server that forwards to the remote server
+      const app = new Hono()
+      app.all("*", async (c) => {
+        const url = new URL(c.req.url)
+        const targetUrl = `${remoteUrl}${url.pathname}${url.search}`
+        return proxy(targetUrl, {
+          ...c.req,
+        })
+      })
+
+      server = Bun.serve({
+        hostname: opts.hostname,
+        port: opts.port,
+        fetch: app.fetch,
+      })
+
+      baseUrl = `http://${server.hostname}:${server.port}`
+    } else {
+      const opts = await resolveNetworkOptions(args)
+      server = Server.listen(opts)
+      baseUrl = `http://${server.hostname}:${server.port}`
+    }
 
     // If prompt is provided, create a session and send the prompt
     if (args.prompt) {
       const sdk = createOpencodeClient({
-        baseUrl,
+        baseUrl: remoteUrl ?? baseUrl,
       })
 
       const session = await sdk.session.create({ directory: process.cwd() })
@@ -47,6 +81,8 @@ export const ServeCommand = cmd({
     }
 
     await new Promise(() => {})
-    await server.stop()
+    if (server) {
+      await server.stop()
+    }
   },
 })

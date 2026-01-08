@@ -394,7 +394,12 @@ export namespace ACP {
             .prompt({
               sessionID: sessionId,
               directory,
-              message: this.config.initialPrompt,
+              parts: [
+                {
+                  type: "text",
+                  text: this.config.initialPrompt,
+                },
+              ],
             })
             .catch((err) => {
               log.error("failed to send initial prompt", { error: err, sessionId })
