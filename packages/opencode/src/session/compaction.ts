@@ -276,7 +276,7 @@ When constructing the summary, try to stick to this template:
           (input.overflow
             ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
             : "") +
-          "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
+          "Continue if you have next steps. Check the todo list to see what tasks remain additionally to the ones outlined in the summary. Stop and ask for clarification if you are unsure how to proceed."
         await Session.updatePart({
           id: PartID.ascending(),
           messageID: continueMsg.id,
