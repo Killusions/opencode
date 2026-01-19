@@ -2,6 +2,7 @@ import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { Installation } from "@/installation"
 import { iife } from "@/util/iife"
 import { setTimeout as sleep } from "node:timers/promises"
+import { ModelsDev } from "@/provider/models"
 
 const CLIENT_ID = "Ov23li8tweQw6odWQebz"
 // Add a small safety buffer when polling to avoid hitting the server
@@ -20,6 +21,17 @@ function getUrls(domain: string) {
 
 export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
   const sdk = input.client
+
+  // Cache models.dev data to reference correct context limits
+  let modelsDevDatabase: Record<string, any> | null = null
+
+  async function getModelsDevDatabase() {
+    if (!modelsDevDatabase) {
+      modelsDevDatabase = await ModelsDev.get()
+    }
+    return modelsDevDatabase
+  }
+
   return {
     auth: {
       provider: "github-copilot",
@@ -31,6 +43,9 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
         const baseURL = enterpriseUrl ? `https://copilot-api.${normalizeDomain(enterpriseUrl)}` : undefined
 
         if (provider && provider.models) {
+          // Get models.dev database to reference correct limits from source providers
+          const database = await getModelsDevDatabase()
+
           for (const model of Object.values(provider.models)) {
             model.cost = {
               input: 0,
@@ -55,6 +70,60 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
             // model.api.url = url
             // model.api.npm = claude ? "@ai-sdk/anthropic" : "@ai-sdk/github-copilot"
             model.api.npm = "@ai-sdk/github-copilot"
+
+            // Override context limits based on the source provider's actual limits
+            // GitHub Copilot may report lower limits than what the underlying APIs support
+            const modelId = model.id.toLowerCase()
+
+            // Try to find the model in the source providers and use their context limit
+            let foundCorrectLimit = false
+
+            // Check Anthropic for Claude models
+            if (modelId.includes("claude")) {
+              const anthropicProvider = database?.anthropic
+              if (anthropicProvider?.models) {
+                // Map GitHub Copilot model names to Anthropic model names
+                for (const [anthropicModelId, anthropicModel] of Object.entries(anthropicProvider.models)) {
+                  const anthropicIdLower = String(anthropicModelId).toLowerCase()
+
+                  // Match based on model family (e.g., "sonnet-4", "opus-4", "haiku-4")
+                  if (modelId.includes("sonnet-4") && anthropicIdLower.includes("sonnet-4")) {
+                    model.limit.context = (anthropicModel as any).limit.context
+                    foundCorrectLimit = true
+                    break
+                  } else if (modelId.includes("opus-4") && anthropicIdLower.includes("opus-4")) {
+                    model.limit.context = (anthropicModel as any).limit.context
+                    foundCorrectLimit = true
+                    break
+                  } else if (modelId.includes("haiku-4") && anthropicIdLower.includes("haiku-4")) {
+                    model.limit.context = (anthropicModel as any).limit.context
+                    foundCorrectLimit = true
+                    break
+                  } else if (modelId.includes("3.7-sonnet") && anthropicIdLower.includes("3.7-sonnet")) {
+                    model.limit.context = (anthropicModel as any).limit.context
+                    foundCorrectLimit = true
+                    break
+                  }
+                }
+              }
+            }
+
+            // Check OpenAI for GPT and o1 models
+            if (!foundCorrectLimit && (modelId.startsWith("gpt-") || modelId.startsWith("o1") || modelId === "o1")) {
+              const openaiProvider = database?.openai
+              if (openaiProvider?.models) {
+                const openaiModel = openaiProvider.models[model.id] || openaiProvider.models[modelId]
+                if (openaiModel && (openaiModel as any).limit?.context) {
+                  model.limit.context = (openaiModel as any).limit.context
+                  foundCorrectLimit = true
+                }
+              }
+            }
+
+            // Copilot actually only provides 90% of the context length
+            if (foundCorrectLimit) {
+              model.limit.context = Math.floor(model.limit.context * 0.9)
+            }
           }
         }
 
