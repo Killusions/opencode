@@ -188,20 +188,40 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
               return { isVision: false, isAgent: false }
             })
 
+            // Mimic VSCode Insiders to enable vision features on Enterprise Copilot
+            // Based on MITM capture: VSCode Insiders uses "vscode/1.109.0-insider" format
+            const vscodeVersion = "1.109.0-insider"
+            const pluginVersion = "copilot-chat/0.37.2026012101"
+
+            // Generate stable IDs for this session
+            const sessionId = crypto.randomUUID()
+            const machineId = crypto.randomUUID()
+            const requestId = crypto.randomUUID()
+            const interactionId = crypto.randomUUID()
+
             const headers: Record<string, string> = {
-              "x-initiator": isAgent ? "agent" : "user",
               ...(init?.headers as Record<string, string>),
-              "User-Agent": `opencode/${Installation.VERSION}`,
-              Authorization: `Bearer ${info.refresh}`,
-              "Openai-Intent": "conversation-edits",
+              authorization: `Bearer ${info.refresh}`,
+              "content-type": "application/json",
+              "copilot-integration-id": "vscode-chat",
+              "editor-plugin-version": pluginVersion,
+              "editor-version": `vscode/${vscodeVersion}`,
+              "openai-intent": isAgent ? "conversation-agent" : "conversation-panel",
+              "user-agent": `GitHubCopilotChat/${pluginVersion}`,
+              "vscode-machineid": machineId,
+              "vscode-sessionid": sessionId,
+              "x-github-api-version": "2025-10-01",
+              "x-initiator": isAgent ? "agent" : "user",
+              "x-interaction-id": interactionId,
+              "x-interaction-type": isAgent ? "conversation-agent" : "conversation-panel",
+              "x-request-id": requestId,
             }
 
             if (isVision) {
-              headers["Copilot-Vision-Request"] = "true"
+              headers["copilot-vision-request"] = "true"
             }
 
             delete headers["x-api-key"]
-            delete headers["authorization"]
 
             return fetch(request, {
               ...init,
