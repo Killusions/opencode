@@ -568,6 +568,9 @@ export function SessionTurn(
                   </Collapsible>
                 </div>
               </Show>
+              <Show when={(message()! as UserMessage).pinned}>
+                <span data-slot="session-turn-pinned-badge">Pinned</span>
+              </Show>
               <Show when={error()}>
                 <Card variant="error" class="error-card">
                   {errorText()}
