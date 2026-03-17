@@ -218,6 +218,7 @@ export function MessageTimeline(props: {
   anchor: (id: string) => string
   onRevert?: (messageID: string) => void
   onFork?: (messageID: string) => void
+  onPin?: (messageID: string) => void
 }) {
   let touchGesture: number | undefined
 
@@ -1011,6 +1012,7 @@ export function MessageTimeline(props: {
                         editToolDefaultOpen={settings.general.editToolPartsExpanded()}
                         onRevert={props.onRevert ? () => props.onRevert!(messageID) : undefined}
                         onFork={props.onFork ? () => props.onFork!(messageID) : undefined}
+                        onPin={props.onPin ? () => props.onPin!(messageID) : undefined}
                         classes={{
                           root: "min-w-0 w-full relative",
                           content: "flex flex-col justify-between !overflow-visible",

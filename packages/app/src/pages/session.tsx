@@ -1732,7 +1732,34 @@ export default function Page() {
                     }}
                     renderedUserMessages={historyWindow.renderedUserMessages()}
                     anchor={anchor}
-                    onRevert={(messageID) => {
+                    onPin={async (messageID) => {
+                      const sessionID = params.id
+                      if (!sessionID) return
+
+                      const msg = visibleUserMessages().find((m) => m.id === messageID)
+                      const wasPinned = msg?.pinned
+
+                      try {
+                        await sdk.client.session.message2.pin({
+                          sessionID,
+                          messageID,
+                          pinned: !wasPinned,
+                        })
+                        showToast({
+                          title: wasPinned ? "Message unpinned" : "Message pinned",
+                          description: wasPinned
+                            ? "Message will be subject to compaction"
+                            : "Message will be preserved during compaction",
+                        })
+                      } catch (err) {
+                        showToast({
+                          title: "Failed to pin message",
+                          description: err instanceof Error ? err.message : "Unknown error",
+                          variant: "error",
+                        })
+                      }
+                    }}
+                    onRevert={async (messageID) => {
                       const sessionID = params.id
                       if (!sessionID) return
                       void revert({ sessionID, messageID })
