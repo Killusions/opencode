@@ -6,6 +6,9 @@ import { Flag } from "@opencode-ai/core/flag/flag"
 import open from "open"
 import { networkInterfaces } from "os"
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
+import { Hono } from "hono"
+import { proxy } from "hono/proxy"
+import { Server } from "@/server/server"
 
 function getNetworkIPs() {
   const nets = networkInterfaces()
@@ -32,30 +35,59 @@ function getNetworkIPs() {
 export const WebCommand = effectCmd({
   command: "web",
   builder: (yargs) => {
-    return withNetworkOptions(yargs).option("prompt", {
-      describe: "prompt to use",
-      type: "string",
-    })
+    return withNetworkOptions(yargs)
+      .option("prompt", {
+        describe: "prompt to use",
+        type: "string",
+      })
+      .option("attach", {
+        describe: "attach to an existing OpenCode server",
+        type: "string",
+      })
   },
   describe: "start opencode server and open web interface",
   // Server loads instances per-request via x-opencode-directory header — no
   // ambient project InstanceContext needed at startup.
   instance: false,
   handler: Effect.fn("Cli.web")(function* (args) {
-    const { Server } = yield* Effect.promise(() => import("../../server/server"))
-    if (!Flag.OPENCODE_SERVER_PASSWORD) {
-      UI.println(UI.Style.TEXT_WARNING_BOLD + "!  OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
-    }
+    let server: Awaited<ReturnType<typeof Server.listen>> | ReturnType<typeof Bun.serve> | undefined
+    let baseUrl: string
     const opts = yield* resolveNetworkOptions(args)
-    const server = yield* Effect.promise(() => Server.listen(opts))
+    let remoteUrl: string | undefined
+
+    if (args.attach) {
+      remoteUrl = args.attach
+
+      const app = new Hono()
+      app.all("*", async (c) => {
+        const url = new URL(c.req.url)
+        const targetUrl = `${remoteUrl}${url.pathname}${url.search}`
+        return proxy(targetUrl, {
+          ...c.req,
+        })
+      })
+
+      server = Bun.serve({
+        hostname: opts.hostname,
+        port: opts.port,
+        fetch: app.fetch,
+      })
+
+      baseUrl = opts.hostname === "0.0.0.0" ? `http://localhost:${server.port}` : server.url.toString()
+    } else {
+      if (!Flag.OPENCODE_SERVER_PASSWORD) {
+        UI.println(UI.Style.TEXT_WARNING_BOLD + "!  OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
+      }
+      server = yield* Effect.promise(() => Server.listen(opts))
+      baseUrl = opts.hostname === "0.0.0.0" ? `http://localhost:${server.port}` : server.url.toString()
+    }
+
     UI.empty()
     UI.println(UI.logo("  "))
     UI.empty()
 
-    const baseUrl = opts.hostname === "0.0.0.0" ? `http://localhost:${server.port}` : server.url.toString()
-
     if (args.prompt) {
-      const sdk = createOpencodeClient({ baseUrl })
+      const sdk = createOpencodeClient({ baseUrl: remoteUrl ?? baseUrl })
 
       const session = yield* Effect.promise(() =>
         sdk.session.create({ directory: process.cwd() }).then((res) => res.data),
