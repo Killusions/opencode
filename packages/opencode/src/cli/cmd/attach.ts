@@ -3,6 +3,7 @@ import { UI } from "@/cli/ui"
 import { errorMessage } from "@opencode-ai/tui/util/error"
 import { validateSession } from "../tui/validate-session"
 import { ServerAuth } from "@/server/auth"
+import { parseSessionUrl } from "@/util/parse-session-url"
 
 export const AttachCommand = cmd({
   command: "attach <url>",
@@ -11,7 +12,7 @@ export const AttachCommand = cmd({
     yargs
       .positional("url", {
         type: "string",
-        describe: "http://localhost:4096",
+        describe: "http://localhost:4096 or http://localhost:4096/ses_xxx/session/ses_xxx",
         demandOption: true,
       })
       .option("dir", {
@@ -118,16 +119,17 @@ export const AttachCommand = cmd({
     const headers = ServerAuth.headers({ password: args.password, username: args.username })
     const config = await TuiConfig.get()
 
-    const prompt = await (async () => {
-      const piped = process.stdin.isTTY ? undefined : await Bun.stdin.text()
-      if (!args.prompt) return piped
-      if (!piped) return args.prompt
-      return piped + "\n" + args.prompt
-    })()
+      const prompt = await (async () => {
+        const piped = process.stdin.isTTY ? undefined : await Bun.stdin.text()
+        if (!args.prompt) return piped
+        if (!piped) return args.prompt
+        return piped + "\n" + args.prompt
+      })()
 
-    try {
-      await validateSession({
-        url: args.url,
+      const { baseUrl, sessionId } = parseSessionUrl(args.url)
+
+      await tui({
+        url: baseUrl,
         sessionID: args.session,
         directory,
         headers,
@@ -148,7 +150,7 @@ export const AttachCommand = cmd({
         pluginHost: createLegacyTuiPluginHost(),
         args: {
           continue: args.continue,
-          sessionID: args.session,
+          sessionID: args.session ?? sessionId,
           fork: args.fork,
           prompt,
         },

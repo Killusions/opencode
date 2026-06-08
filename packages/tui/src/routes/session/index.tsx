@@ -82,6 +82,7 @@ import { getRevertDiffFiles } from "../../util/revert-diff"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { LocationProvider } from "../../context/location"
+import { useArgs } from "../../context/args"
 
 addDefaultParsers(parsers.parsers)
 
@@ -343,6 +344,20 @@ export function Session() {
     seeded = true
     r.set(route.prompt)
   }
+
+  const args = useArgs()
+
+  // Auto-submit prompt when attaching to an existing session via URL
+  let promptSubmitted = false
+  createEffect(() => {
+    if (promptSubmitted || !args.prompt || !args.sessionID || !prompt) return
+    if (!sync.session.get(route.sessionID)) return
+
+    promptSubmitted = true
+    prompt.set({ input: args.prompt, parts: [] })
+    prompt.submit()
+  })
+
   const keymap = useOpencodeKeymap()
   const dialog = useDialog()
   const renderer = useRenderer()

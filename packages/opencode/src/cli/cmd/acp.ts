@@ -5,6 +5,7 @@ import { ServerAuth } from "@/server/auth"
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { ACPProfile } from "@/acp/profile"
+import { parseSessionUrl } from "@/util/parse-session-url"
 
 export const AcpCommand = effectCmd({
   command: "acp",
@@ -21,7 +22,7 @@ export const AcpCommand = effectCmd({
         type: "string",
       })
       .option("attach", {
-        describe: "attach to existing server URL instead of starting new one",
+        describe: "attach to existing server URL or session URL instead of starting new one",
         type: "string",
       })
   },
@@ -34,7 +35,8 @@ export const AcpCommand = effectCmd({
     let baseUrl: string
 
     if (args.attach) {
-      baseUrl = args.attach
+      const parsed = parseSessionUrl(args.attach)
+      baseUrl = parsed.baseUrl
     } else {
       const opts = yield* resolveNetworkOptions(args)
       server = yield* Effect.promise(() => ACPProfile.measure("cli.acp.server.listen", () => Server.listen(opts)))

@@ -9,6 +9,7 @@ import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { Hono } from "hono"
 import { proxy } from "hono/proxy"
 import { Server } from "@/server/server"
+import { parseSessionUrl } from "@/util/parse-session-url"
 
 function getNetworkIPs() {
   const nets = networkInterfaces()
@@ -41,7 +42,7 @@ export const WebCommand = effectCmd({
         type: "string",
       })
       .option("attach", {
-        describe: "attach to an existing OpenCode server",
+        describe: "attach to an existing OpenCode server or session URL",
         type: "string",
       })
   },
@@ -54,9 +55,12 @@ export const WebCommand = effectCmd({
     let baseUrl: string
     const opts = yield* resolveNetworkOptions(args)
     let remoteUrl: string | undefined
+    let sessionId: string | undefined
 
     if (args.attach) {
-      remoteUrl = args.attach
+      const parsed = parseSessionUrl(args.attach)
+      remoteUrl = parsed.baseUrl
+      sessionId = parsed.sessionId
 
       const app = new Hono()
       app.all("*", async (c) => {
@@ -86,32 +90,41 @@ export const WebCommand = effectCmd({
     UI.println(UI.logo("  "))
     UI.empty()
 
-    if (args.prompt) {
+    if (args.prompt || sessionId) {
       const sdk = createOpencodeClient({ baseUrl: remoteUrl ?? baseUrl })
 
-      const session = yield* Effect.promise(() =>
-        sdk.session.create({ directory: process.cwd() }).then((res) => res.data),
-      )
-      if (!session) {
-        UI.println(UI.Style.TEXT_INFO_BOLD + "  Web interface:    ", UI.Style.TEXT_NORMAL, baseUrl)
-        open(baseUrl).catch(() => {})
-        yield* Effect.never
+      let actualSessionId: string
+
+      if (sessionId) {
+        actualSessionId = sessionId
+      } else {
+        const session = yield* Effect.promise(() =>
+          sdk.session.create({ directory: process.cwd() }).then((res) => res.data),
+        )
+        if (!session) {
+          UI.println(UI.Style.TEXT_INFO_BOLD + "  Web interface:    ", UI.Style.TEXT_NORMAL, baseUrl)
+          open(baseUrl).catch(() => {})
+          yield* Effect.never
+        }
+        actualSessionId = session!.id
       }
 
-      const sessionUrl = `${baseUrl}/${session.id}/session/${session.id}`
+      const sessionUrl = `${baseUrl}/${actualSessionId}/session/${actualSessionId}`
 
-      sdk.session
-        .prompt({
-          sessionID: session.id,
-          directory: process.cwd(),
-          parts: [
-            {
-              type: "text",
-              text: args.prompt,
-            },
-          ],
-        })
-        .catch(() => {})
+      if (args.prompt) {
+        sdk.session
+          .prompt({
+            sessionID: actualSessionId,
+            directory: process.cwd(),
+            parts: [
+              {
+                type: "text",
+                text: args.prompt,
+              },
+            ],
+          })
+          .catch(() => {})
+      }
 
       UI.println(UI.Style.TEXT_INFO_BOLD + "  Session URL:       ", UI.Style.TEXT_NORMAL, sessionUrl)
       UI.empty()
