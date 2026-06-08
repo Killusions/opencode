@@ -293,6 +293,12 @@ const layer = Layer.effect(
       auto: boolean
       overflow?: boolean
     }) {
+      // Prune tool outputs before compaction when overflow triggered it,
+      // freeing context window space for the compaction itself.
+      if (input.overflow) {
+        yield* prune({ sessionID: input.sessionID })
+      }
+
       const parent = input.messages.findLast((m) => m.info.id === input.parentID)
       if (!parent || parent.info.role !== "user") {
         throw new Error(`Compaction parent must be a user message: ${input.parentID}`)
@@ -311,7 +317,7 @@ const layer = Layer.effect(
         const idx = input.messages.findIndex((m) => m.info.id === input.parentID)
         for (let i = idx - 1; i >= 0; i--) {
           const msg = input.messages[i]
-          if (msg.info.role === "user" && !msg.parts.some((p) => p.type === "compaction")) {
+          if (msg.info.role === "user" && !msg.parts.some((p) => p.type === "compaction") && msg.info.pinned === true) {
             replay = { info: msg.info, parts: msg.parts }
             messages = input.messages.slice(0, i)
             break
