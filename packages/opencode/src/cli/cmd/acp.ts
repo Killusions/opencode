@@ -20,17 +20,29 @@ export const AcpCommand = effectCmd({
         describe: "prompt to use",
         type: "string",
       })
+      .option("attach", {
+        describe: "attach to existing server URL instead of starting new one",
+        type: "string",
+      })
   },
   handler: Effect.fn("Cli.acp")(function* (args) {
     const { Server } = yield* Effect.promise(() => import("@/server/server"))
     const { ACP } = yield* Effect.promise(() => import("@/acp/agent"))
     ACPProfile.mark("cli.acp.handler")
     process.env.OPENCODE_CLIENT = "acp"
-    const opts = yield* resolveNetworkOptions(args)
-    const server = yield* Effect.promise(() => ACPProfile.measure("cli.acp.server.listen", () => Server.listen(opts)))
+    let server: Awaited<ReturnType<typeof Server.listen>> | undefined
+    let baseUrl: string
+
+    if (args.attach) {
+      baseUrl = args.attach
+    } else {
+      const opts = yield* resolveNetworkOptions(args)
+      server = yield* Effect.promise(() => ACPProfile.measure("cli.acp.server.listen", () => Server.listen(opts)))
+      baseUrl = `http://${server.hostname}:${server.port}`
+    }
 
     const sdk = createOpencodeClient({
-      baseUrl: `http://${server.hostname}:${server.port}`,
+      baseUrl,
       headers: ServerAuth.headers(),
     })
 
@@ -74,5 +86,9 @@ export const AcpCommand = effectCmd({
           process.stdin.on("error", reject)
         }),
     )
+
+    if (server) {
+      yield* Effect.promise(() => server.stop())
+    }
   }),
 })
