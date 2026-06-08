@@ -162,7 +162,15 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
               ...(init?.headers as Record<string, string>),
               "User-Agent": `opencode/${InstallationVersion}`,
               Authorization: `Bearer ${info.refresh}`,
-              "Openai-Intent": "conversation-edits",
+              "Openai-Intent": isAgent ? "conversation-agent" : "conversation-panel",
+              "editor-version": "vscode/1.97.2",
+              "editor-plugin-version": "copilot-chat/0.25.2025021301",
+              "copilot-integration-id": "vscode-chat",
+              "vscode-machineid": "opencode-machine",
+              "vscode-sessionid": `opencode-session-${Date.now()}`,
+              "x-request-id": crypto.randomUUID(),
+              "x-interaction-id": crypto.randomUUID(),
+              "x-interaction-type": isAgent ? "agent" : "user",
             }
 
             if (isVision) {
