@@ -259,6 +259,7 @@ export type UserMessage = {
   tools?: {
     [key: string]: boolean
   }
+  pinned?: boolean
 }
 
 export type ProviderAuthError = {
@@ -3982,6 +3983,7 @@ export type SessionMessageUser = {
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
   type: "user"
+  pinned?: boolean
 }
 
 export type SessionMessageSynthetic = {
@@ -10475,6 +10477,43 @@ export type PartUpdateResponses = {
 }
 
 export type PartUpdateResponse = PartUpdateResponses[keyof PartUpdateResponses]
+
+export type MessagePinData = {
+  body?: {
+    pinned?: boolean
+  }
+  path: {
+    sessionID: string
+    messageID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/message/{messageID}/pin"
+}
+
+export type MessagePinErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type MessagePinError = MessagePinErrors[keyof MessagePinErrors]
+
+export type MessagePinResponses = {
+  /**
+   * Successfully updated message pin status
+   */
+  200: UserMessage
+}
+
+export type MessagePinResponse = MessagePinResponses[keyof MessagePinResponses]
 
 export type SyncStartData = {
   body?: never

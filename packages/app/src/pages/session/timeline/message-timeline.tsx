@@ -691,6 +691,33 @@ export function MessageTimeline(props: {
     },
   }))
 
+  const pinMutation = useMutation(() => ({
+    mutationFn: (input: { sessionID: string; messageID: string; pinned: boolean }) =>
+      sdk().client.message.pin({
+        sessionID: input.sessionID,
+        messageID: input.messageID,
+        pinned: input.pinned,
+      }),
+    onSuccess: (_, input) => {
+      sync().set(
+        produce((draft) => {
+          const msgs = draft.message[input.sessionID]
+          if (!msgs) return
+          const msg = msgs.find((m) => m.id === input.messageID)
+          if (msg && msg.role === "user") {
+            msg.pinned = input.pinned
+          }
+        }),
+      )
+    },
+    onError: (err) => {
+      showToast({
+        title: language.t("common.requestFailed"),
+        description: errorMessage(err),
+      })
+    },
+  }))
+
   const shareSession = () => {
     const id = sessionID()
     if (!id || shareMutation.isPending) return
@@ -1183,6 +1210,32 @@ export function MessageTimeline(props: {
                             Fork
                           </button>
                         </Show>
+                        <button
+                          data-slot="session-turn-action"
+                          class="rounded px-2 py-0.5 text-xs font-medium text-text-base bg-surface-raised-base hover:bg-surface-raised-hover transition-colors"
+                          onClick={() => {
+                            const sid = params.id
+                            if (!sid) return
+                            pinMutation.mutate({
+                              sessionID: sid,
+                              messageID: message().id,
+                              pinned: !message().pinned,
+                            })
+                          }}
+                          title={message().pinned ? "Unpin message" : "Pin message"}
+                        >
+                          {message().pinned ? "Unpin" : "Pin"}
+                        </button>
+                      </div>
+                    </div>
+                  </Show>
+                  <Show when={message().pinned}>
+                    <div class="absolute left-0 top-0 z-10">
+                      <div class="flex items-center gap-1 text-11-medium text-accent-base">
+                        <svg class="size-3" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M16 12V4H17V2H7V4H8V12L6 14V16H11.2V22H12.8V16H18V14L16 12Z" />
+                        </svg>
+                        <span>Pinned</span>
                       </div>
                     </div>
                   </Show>

@@ -46,6 +46,9 @@ export const MessagesQuery = Schema.Struct({
   before: Schema.optional(Schema.String),
 })
 export const StatusMap = Schema.Record(Schema.String, SessionStatus.Info)
+export const UpdateMessagePayload = Schema.Struct({
+  pinned: Schema.optional(Schema.Boolean),
+})
 export const UpdatePayload = Schema.Struct({
   title: Schema.optional(Schema.String),
   metadata: Schema.optional(Session.Metadata),
@@ -100,6 +103,7 @@ export const SessionPaths = {
   unrevert: `${root}/:sessionID/unrevert`,
   permissions: `${root}/:sessionID/permissions/:permissionID`,
   deleteMessage: `${root}/:sessionID/message/:messageID`,
+  pinMessage: `${root}/:sessionID/message/:messageID/pin`,
   deletePart: `${root}/:sessionID/message/:messageID/part/:partID`,
   updatePart: `${root}/:sessionID/message/:messageID/part/:partID`,
 } as const
@@ -428,6 +432,18 @@ export const SessionApi = HttpApi.make("session")
           OpenApi.annotations({
             identifier: "part.delete",
             description: "Delete a part from a message.",
+          }),
+        ),
+        HttpApiEndpoint.patch("pinMessage", SessionPaths.pinMessage, {
+          params: { sessionID: SessionID, messageID: MessageID },
+          query: WorkspaceRoutingQuery,
+          payload: UpdateMessagePayload,
+          success: described(SessionV1.User, "Successfully updated message pin status"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "message.pin",
+            description: "Update the pin status of a message.",
           }),
         ),
         HttpApiEndpoint.patch("updatePart", SessionPaths.updatePart, {
