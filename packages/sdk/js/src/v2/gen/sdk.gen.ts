@@ -111,6 +111,8 @@ import type {
   McpRemoteConfig,
   McpStatusErrors,
   McpStatusResponses,
+  MessagePinErrors,
+  MessagePinResponses,
   ModelRef,
   MoveSessionDestination,
   OutputFormat,
@@ -4404,6 +4406,47 @@ export class Part extends HeyApiClient {
   }
 }
 
+export class Message extends HeyApiClient {
+  /**
+   * Update the pin status of a message.
+   */
+  public pin<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      messageID: string
+      directory?: string
+      workspace?: string
+      pinned?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "messageID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "pinned" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<MessagePinResponses, MessagePinErrors, ThrowOnError>({
+      url: "/session/{sessionID}/message/{messageID}/pin",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class History extends HeyApiClient {
   /**
    * List sync events
@@ -7200,6 +7243,11 @@ export class OpencodeClient extends HeyApiClient {
   private _part?: Part
   get part(): Part {
     return (this._part ??= new Part({ client: this.client }))
+  }
+
+  private _message?: Message
+  get message(): Message {
+    return (this._message ??= new Message({ client: this.client }))
   }
 
   private _sync?: Sync

@@ -34,6 +34,7 @@ import {
   RevertPayload,
   ShellPayload,
   SummarizePayload,
+  UpdateMessagePayload,
   UpdatePayload,
 } from "../groups/session"
 import { PermissionNotFoundError } from "../errors"
@@ -377,6 +378,22 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return true
     })
 
+    const pinMessage = Effect.fn("SessionHttpApi.pinMessage")(function* (ctx: {
+      params: { sessionID: SessionID; messageID: MessageID }
+      payload: typeof UpdateMessagePayload.Type
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      const msg = yield* SessionError.mapStorageNotFound(
+        MessageV2.get({ sessionID: ctx.params.sessionID, messageID: ctx.params.messageID }),
+      )
+      if (msg.info.role !== "user") {
+        return yield* new HttpApiError.BadRequest({})
+      }
+      const updated = { ...msg.info, pinned: ctx.payload.pinned }
+      yield* session.updateMessage(updated)
+      return updated
+    })
+
     const deleteMessage = Effect.fn("SessionHttpApi.deleteMessage")(function* (ctx: {
       params: { sessionID: SessionID; messageID: MessageID }
     }) {
@@ -435,6 +452,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("revert", revert)
       .handle("unrevert", unrevert)
       .handle("permissionRespond", permissionRespond)
+      .handle("pinMessage", pinMessage)
       .handle("deleteMessage", deleteMessage)
       .handle("deletePart", deletePart)
       .handle("updatePart", updatePart)
