@@ -156,13 +156,14 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   ) {
     for (const key of Object.keys(tools)) tools[key] = { ...tools[key], strict: false }
   }
-  if (
-    (input.model.providerID.includes("github-copilot") || input.model.api.npm === "@ai-sdk/openai-compatible") &&
-    Object.keys(tools).length === 0 &&
-    hasToolCalls(input.messages)
-  ) {
-    // Copilot and openai-compatible providers need a tools field when replaying prior tool calls,
-    // even if no tools are currently enabled.
+  // OpenAI-compatible and Github Copilot compaction require the tools parameter to be
+  // present when message history contains tool calls, even if no tools are being used.
+  // Add a dummy tool that is never called to satisfy this validation.
+  const isCompactionCopilot =
+    input.agent.name === "compaction" && input.model.providerID.toLowerCase().includes("github-copilot")
+  const needsDummyTools = isCompactionCopilot || input.model.api.npm === "@ai-sdk/openai-compatible"
+
+  if (needsDummyTools && Object.keys(tools).length === 0 && hasToolCalls(input.messages)) {
     tools["_noop"] = aiTool({
       description: "Do not call this tool. It exists only for API compatibility and must never be invoked.",
       inputSchema: jsonSchema({
