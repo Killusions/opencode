@@ -1883,6 +1883,27 @@ export default function Page() {
     return revertMutation.mutateAsync(input)
   }
 
+  const forkMutation = useMutation(() => ({
+    mutationFn: async (input: { sessionID: string; messageID: string }) => {
+      await halt(input.sessionID)
+      const result = await sdk().client.session.fork({
+        sessionID: input.sessionID,
+        messageID: input.messageID,
+      })
+      if (result.data)
+        navigate(
+          params.serverKey
+            ? sessionHref(requireServerKey(params.serverKey), result.data.id)
+            : legacySessionHref(sdk().directory, result.data.id),
+        )
+    },
+  }))
+
+  const fork = (input: { sessionID: string; messageID: string }) => {
+    if (forkMutation.isPending) return
+    return forkMutation.mutateAsync(input)
+  }
+
   const restore = (id: string) => {
     if (!params.id || reverting()) return
     return restoreMutation.mutateAsync(id)
@@ -2113,6 +2134,16 @@ export default function Page() {
                   }}
                   setScrollToEnd={(fn) => {
                     scrollToEnd = fn
+                  }}
+                  onRevert={(messageID) => {
+                    const sessionID = params.id
+                    if (!sessionID) return
+                    void revert({ sessionID, messageID })
+                  }}
+                  onFork={(messageID) => {
+                    const sessionID = params.id
+                    if (!sessionID) return
+                    void fork({ sessionID, messageID })
                   }}
                 />
               )}

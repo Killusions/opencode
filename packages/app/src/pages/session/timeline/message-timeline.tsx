@@ -254,6 +254,8 @@ export function MessageTimeline(props: {
   setRevealMessage?: (fn: (id: string) => void) => void
   setScrollToEnd?: (fn: () => void) => void
   setHistoryAnchor?: (handlers: { capture: () => void; restore: (done: boolean) => void }) => void
+  onRevert?: (messageID: string) => void
+  onFork?: (messageID: string) => void
 }) {
   let touchGesture: number | undefined
 
@@ -1153,7 +1155,37 @@ export function MessageTimeline(props: {
           <TimelineRowFrame row={userMessageRow}>
             <Show when={message()}>
               {(message) => (
-                <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+                <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5 relative group">
+                  <Show when={props.onRevert || props.onFork}>
+                    <div
+                      data-slot="session-turn-header"
+                      class="absolute right-0 top-0 z-10 flex items-center gap-2 pl-4 opacity-0 transition-opacity duration-150 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
+                      style={{ background: "linear-gradient(to right, transparent, var(--background-stronger) 12px)" }}
+                    >
+                      <div data-slot="session-turn-message-actions" class="flex gap-1">
+                        <Show when={props.onRevert}>
+                          <button
+                            data-slot="session-turn-action"
+                            class="rounded px-2 py-0.5 text-xs font-medium text-text-base bg-surface-raised-base hover:bg-surface-raised-hover transition-colors"
+                            onClick={() => props.onRevert?.(message().id)}
+                            title="Revert to this message"
+                          >
+                            Revert
+                          </button>
+                        </Show>
+                        <Show when={props.onFork}>
+                          <button
+                            data-slot="session-turn-action"
+                            class="rounded px-2 py-0.5 text-xs font-medium text-text-base bg-surface-raised-base hover:bg-surface-raised-hover transition-colors"
+                            onClick={() => props.onFork?.(message().id)}
+                            title="Fork from this message"
+                          >
+                            Fork
+                          </button>
+                        </Show>
+                      </div>
+                    </div>
+                  </Show>
                   <div data-slot="session-turn-message-content" aria-live="off">
                     <Message
                       message={message()}
