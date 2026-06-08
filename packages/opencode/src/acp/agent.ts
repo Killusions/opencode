@@ -21,10 +21,18 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import * as ACPError from "./error"
 import * as ACPService from "./service"
 
-export function init({ sdk: _sdk, initialPrompt }: { sdk: OpencodeClient; initialPrompt?: string }) {
+export function init({
+  sdk: _sdk,
+  initialPrompt,
+  sessionId,
+}: {
+  sdk: OpencodeClient
+  initialPrompt?: string
+  sessionId?: string
+}) {
   return {
     create: (connection: AgentSideConnection) => {
-      return new Agent(ACPService.make({ sdk: _sdk, connection, initialPrompt }))
+      return new Agent(ACPService.make({ sdk: _sdk, connection, initialPrompt, sessionId }))
     },
   }
 }
