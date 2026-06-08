@@ -80,6 +80,7 @@ export function make(input: {
   usage?: UsageService.Interface
   eventSubscription?: (subscription: ACPEvent.Subscription) => void
   initialPrompt?: string
+  sessionId?: string
 }): Interface {
   const session = input.session ?? makeSessionService()
   const directoryService = input.directory ?? makeDirectoryService(input.sdk)
@@ -161,6 +162,74 @@ export function make(input: {
 
   const newSession = Effect.fn("ACP.newSession")(function* (params: NewSessionRequest) {
     const started = performance.now()
+
+    // If sessionId is provided, load existing session instead of creating new one
+    if (input.sessionId) {
+      const snapshot = yield* directorySnapshot(params.cwd)
+      yield* request(
+        () => input.sdk.session.get({ directory: params.cwd, sessionID: input.sessionId! }, { throwOnError: true }),
+        "session",
+      )
+      const messages = yield* request(
+        () =>
+          input.sdk.session.messages(
+            { directory: params.cwd, sessionID: input.sessionId!, limit: 20 },
+            { throwOnError: true },
+          ),
+        "session",
+      )
+      const restored = restoreFromMessages(messages.map((item) => item.info))
+      const model = restored.model ?? selectDefaultModel(snapshot)
+      const state = yield* session.load({
+        id: input.sessionId!,
+        cwd: params.cwd,
+        mcpServers: params.mcpServers,
+        model,
+        variant: restored.variant ?? selectVariant(snapshot, model),
+        modeId: restored.modeId ?? (snapshot.availableModes.length > 0 ? snapshot.defaultModeID : undefined),
+      })
+      sessionSnapshots.set(state.id, snapshot)
+
+      yield* registerMcpServers(input.sdk, registeredMcp, params.cwd, state.id, params.mcpServers)
+      yield* sendAvailableCommands(input.connection, state.id, snapshot)
+      yield* replayMessages(events, messages)
+
+      // Send initial prompt after loading existing session
+      if (input.initialPrompt) {
+        const loadedModel = state.model ?? model
+        const agent = state.modeId ?? (snapshot.availableModes.length > 0 ? snapshot.defaultModeID : undefined)
+        input.sdk.session
+          .prompt({
+            sessionID: state.id,
+            directory: params.cwd,
+            model: {
+              providerID: loadedModel.providerID,
+              modelID: loadedModel.modelID,
+            },
+            ...(agent ? { agent } : {}),
+            parts: [
+              {
+                type: "text",
+                text: input.initialPrompt,
+              },
+            ],
+          })
+          .catch((err) => {
+            log.error("failed to send initial prompt", { error: err, sessionId: state.id })
+          })
+      }
+
+      ACPProfile.duration("acp.newSession", started)
+      return {
+        sessionId: state.id,
+        configOptions: configOptions(snapshot, {
+          model: state.model ?? model,
+          variant: state.variant,
+          modeId: state.modeId,
+        }),
+      }
+    }
+
     const snapshot = yield* directorySnapshot(params.cwd)
     const selected = selectDefaultModel(snapshot)
     const variant = selectVariant(snapshot, selected)

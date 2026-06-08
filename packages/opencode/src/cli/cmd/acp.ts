@@ -25,6 +25,11 @@ export const AcpCommand = effectCmd({
         describe: "attach to existing server URL or session URL instead of starting new one",
         type: "string",
       })
+      .option("session", {
+        describe: "session id to continue",
+        type: "string",
+        alias: ["s"],
+      })
   },
   handler: Effect.fn("Cli.acp")(function* (args) {
     const { Server } = yield* Effect.promise(() => import("@/server/server"))
@@ -33,14 +38,17 @@ export const AcpCommand = effectCmd({
     process.env.OPENCODE_CLIENT = "acp"
     let server: Awaited<ReturnType<typeof Server.listen>> | undefined
     let baseUrl: string
+    let sessionId: string | undefined
 
     if (args.attach) {
       const parsed = parseSessionUrl(args.attach)
       baseUrl = parsed.baseUrl
+      sessionId = args.session ?? parsed.sessionId
     } else {
       const opts = yield* resolveNetworkOptions(args)
       server = yield* Effect.promise(() => ACPProfile.measure("cli.acp.server.listen", () => Server.listen(opts)))
       baseUrl = `http://${server.hostname}:${server.port}`
+      sessionId = args.session
     }
 
     const sdk = createOpencodeClient({
@@ -72,7 +80,7 @@ export const AcpCommand = effectCmd({
     })
 
     const stream = ndJsonStream(input, output)
-    const agent = ACP.init({ sdk, initialPrompt: args.prompt })
+    const agent = ACP.init({ sdk, initialPrompt: args.prompt, sessionId })
 
     new AgentSideConnection((conn) => {
       ACPProfile.mark("cli.acp.connection.create")
