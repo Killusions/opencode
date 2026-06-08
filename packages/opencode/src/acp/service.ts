@@ -215,7 +215,7 @@ export function make(input: {
             ],
           })
           .catch((err) => {
-            log.error("failed to send initial prompt", { error: err, sessionId: state.id })
+            console.error("failed to send initial prompt", { error: err, sessionId: state.id })
           })
       }
 
@@ -294,7 +294,7 @@ export function make(input: {
           ],
         })
         .catch((err) => {
-          log.error("failed to send initial prompt", { error: err, sessionId: state.id })
+          console.error("failed to send initial prompt", { error: err, sessionId: state.id })
         })
     }
 

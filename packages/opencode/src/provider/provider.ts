@@ -1428,11 +1428,12 @@ const layer = Layer.effect(
           for (const [modelID, model] of Object.entries(provider.models)) {
             const devProvider = modelsDev[providerID]
             if (!devProvider) continue
-            const devModel = Object.values(devProvider.models).find(
-              (m) => m.id === modelID || m.name === modelID,
-            )
-            if (devModel?.limit?.context) {
+            const devModel = Object.values(devProvider.models).find((m) => m.id === modelID || m.name === modelID)
+            if (devModel?.limit?.context && devModel.limit.context > model.limit.context) {
               model.limit.context = Math.floor(devModel.limit.context * 0.9)
+              // Clear limit.input so compaction uses context - maxOutputTokens,
+              // not a stale lower input limit from models.dev
+              model.limit.input = undefined
             }
           }
         }

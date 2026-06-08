@@ -185,6 +185,20 @@ const layer = Layer.effect(
       return Token.estimate(JSON.stringify(msgs))
     })
 
+    function sonnetFallback(svc: Provider.Interface, model: Provider.Model) {
+      return Effect.gen(function* () {
+        const info = yield* svc
+          .getProvider(model.providerID)
+          .pipe(Effect.orElseSucceed(() => undefined as Provider.Info | undefined))
+        if (!info) return undefined
+        const id = model.id.toLowerCase().replace("opus", "sonnet")
+        return (
+          Object.values(info.models).find((m: Provider.Model) => m.id.toLowerCase() === id) ??
+          Object.values(info.models).find((m: Provider.Model) => m.id.toLowerCase().includes("sonnet"))
+        )
+      })
+    }
+
     const select = Effect.fn("SessionCompaction.select")(function* (input: {
       messages: SessionV1.WithParts[]
       cfg: ConfigV1.Info
@@ -332,7 +346,7 @@ const layer = Layer.effect(
       }
 
       const agent = yield* agents.get("compaction")
-      const model = agent.model
+      let model = agent.model
         ? yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
         : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID).pipe(Effect.orDie)
       const cfg = yield* config.get()
@@ -354,58 +368,79 @@ const layer = Layer.effect(
       const nextPrompt = compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context })
       const msgs = structuredClone(selected.head)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-      const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, model, {
-        stripMedia: true,
-        toolOutputMaxChars: TOOL_OUTPUT_MAX_CHARS,
-      })
-      const ctx = yield* InstanceState.context
-      const msg: SessionV1.Assistant = {
-        id: MessageID.ascending(),
-        role: "assistant",
-        parentID: input.parentID,
-        sessionID: input.sessionID,
-        mode: "compaction",
-        agent: "compaction",
-        variant: userMessage.model.variant,
-        summary: true,
-        path: {
-          cwd: ctx.directory,
-          root: ctx.worktree,
-        },
-        cost: 0,
-        tokens: {
-          output: 0,
-          input: 0,
-          reasoning: 0,
-          cache: { read: 0, write: 0 },
-        },
-        modelID: model.id,
-        providerID: model.providerID,
-        time: {
-          created: Date.now(),
-        },
+
+      const runCompactionAttempt = (currentModel: Provider.Model) =>
+        Effect.gen(function* () {
+          const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, currentModel, {
+            stripMedia: true,
+            toolOutputMaxChars: TOOL_OUTPUT_MAX_CHARS,
+          })
+          const ctx = yield* InstanceState.context
+          const msg: SessionV1.Assistant = {
+            id: MessageID.ascending(),
+            role: "assistant",
+            parentID: input.parentID,
+            sessionID: input.sessionID,
+            mode: "compaction",
+            agent: "compaction",
+            variant: userMessage.model.variant,
+            summary: true,
+            path: {
+              cwd: ctx.directory,
+              root: ctx.worktree,
+            },
+            cost: 0,
+            tokens: {
+              output: 0,
+              input: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: currentModel.id,
+            providerID: currentModel.providerID,
+            time: {
+              created: Date.now(),
+            },
+          }
+          yield* session.updateMessage(msg)
+          const processor = yield* processors.create({
+            assistantMessage: msg,
+            sessionID: input.sessionID,
+            model: currentModel,
+          })
+          const result = yield* processor.process({
+            user: userMessage,
+            agent,
+            sessionID: input.sessionID,
+            tools: {},
+            system: [],
+            messages: [
+              ...modelMessages,
+              {
+                role: "user",
+                content: [{ type: "text", text: nextPrompt }],
+              },
+            ],
+            model: currentModel,
+          })
+          return { result, processor }
+        })
+
+      let { result, processor } = yield* runCompactionAttempt(model)
+
+      // If opus returns a bad request, retry once with sonnet from the same provider.
+      if (
+        model.id.toLowerCase().includes("opus") &&
+        SessionV1.APIError.isInstance(processor.message.error) &&
+        processor.message.error.data.statusCode === 400
+      ) {
+        const fallback = yield* sonnetFallback(provider, model)
+        if (fallback) {
+          yield* Effect.logInfo("compaction.fallback", { from: model.id, to: fallback.id })
+          model = fallback
+          ;({ result, processor } = yield* runCompactionAttempt(fallback))
+        }
       }
-      yield* session.updateMessage(msg)
-      const processor = yield* processors.create({
-        assistantMessage: msg,
-        sessionID: input.sessionID,
-        model,
-      })
-      const result = yield* processor.process({
-        user: userMessage,
-        agent,
-        sessionID: input.sessionID,
-        tools: {},
-        system: [],
-        messages: [
-          ...modelMessages,
-          {
-            role: "user",
-            content: [{ type: "text", text: nextPrompt }],
-          },
-        ],
-        model,
-      })
 
       if (result === "compact") {
         processor.message.error = new SessionV1.ContextOverflowError({
