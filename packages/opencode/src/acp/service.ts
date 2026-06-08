@@ -215,7 +215,7 @@ export function make(input: {
             ],
           })
           .catch((err) => {
-            console.error("failed to send initial prompt", { error: err, sessionId: state.id })
+            Effect.runFork(Effect.logError("failed to send initial prompt", { error: err, sessionID: state.id }))
           })
       }
 
@@ -294,7 +294,7 @@ export function make(input: {
           ],
         })
         .catch((err) => {
-          console.error("failed to send initial prompt", { error: err, sessionId: state.id })
+          Effect.runFork(Effect.logError("failed to send initial prompt", { error: err, sessionID: state.id }))
         })
     }
 
