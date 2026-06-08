@@ -119,18 +119,19 @@ export const AttachCommand = cmd({
     const headers = ServerAuth.headers({ password: args.password, username: args.username })
     const config = await TuiConfig.get()
 
-      const prompt = await (async () => {
-        const piped = process.stdin.isTTY ? undefined : await Bun.stdin.text()
-        if (!args.prompt) return piped
-        if (!piped) return args.prompt
-        return piped + "\n" + args.prompt
-      })()
+    const prompt = await (async () => {
+      const piped = process.stdin.isTTY ? undefined : await Bun.stdin.text()
+      if (!args.prompt) return piped
+      if (!piped) return args.prompt
+      return piped + "\n" + args.prompt
+    })()
 
-      const { baseUrl, sessionId } = parseSessionUrl(args.url)
+    const { baseUrl, sessionId } = parseSessionUrl(args.url)
 
-      await tui({
+    try {
+      await validateSession({
         url: baseUrl,
-        sessionID: args.session,
+        sessionID: args.session ?? sessionId,
         directory,
         headers,
       })
@@ -145,7 +146,7 @@ export const AttachCommand = cmd({
     const { createLegacyTuiPluginHost } = await import("@/plugin/tui/runtime")
     await Effect.runPromise(
       run({
-        url: args.url,
+        url: baseUrl,
         config,
         pluginHost: createLegacyTuiPluginHost(),
         args: {
