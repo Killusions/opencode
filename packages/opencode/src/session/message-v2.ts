@@ -522,26 +522,61 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
   const result = [] as WithParts[]
   const completed = new Set<string>()
   let retain: MessageID | undefined
+  const pinnedBeforeCompaction = [] as WithParts[]
+  let compactionMessageID: string | undefined
+  let foundCompaction = false
+
   for (const msg of msgs) {
-    result.push(msg)
-    if (retain) {
-      if (msg.info.id === retain) break
-      continue
-    }
-    if (msg.info.role === "user" && completed.has(msg.info.id)) {
+    const isCompactionMessage =
+      msg.info.role === "user" && completed.has(msg.info.id) && msg.parts.some((part) => part.type === "compaction")
+
+    if (isCompactionMessage) {
+      compactionMessageID = msg.info.id
+      result.push(msg)
+      foundCompaction = true
       const part = msg.parts.find((item): item is CompactionPart => item.type === "compaction")
-      if (!part) continue
-      if (!part.tail_start_id) break
-      retain = part.tail_start_id
-      if (msg.info.id === retain) break
+      if (part?.tail_start_id) {
+        retain = part.tail_start_id
+        if (msg.info.id === retain) continue
+      }
       continue
     }
-    if (msg.info.role === "user" && completed.has(msg.info.id) && msg.parts.some((part) => part.type === "compaction"))
-      break
+
+    // After finding compaction, retain tail messages and collect pinned messages
+    if (foundCompaction) {
+      if (retain) {
+        result.push(msg)
+        if (msg.info.id === retain) break
+        continue
+      }
+      if (msg.info.role === "user" && (msg.info as User).pinned === true) {
+        pinnedBeforeCompaction.push(msg)
+      }
+      continue
+    }
+
+    // Before compaction is found, collect messages normally
+    result.push(msg)
+
     if (msg.info.role === "assistant" && msg.info.summary && msg.info.finish && !msg.info.error)
       completed.add(msg.info.parentID)
   }
+
   result.reverse()
+
+  // Only reposition pinned messages if we found a compaction message
+  if (foundCompaction && compactionMessageID && pinnedBeforeCompaction.length > 0) {
+    const pinnedIds = new Set(pinnedBeforeCompaction.map((m) => m.info.id))
+    const withoutPinned = result.filter((msg) => !pinnedIds.has(msg.info.id))
+
+    const compactionIndex = withoutPinned.findIndex((msg) => msg.info.id === compactionMessageID)
+    if (compactionIndex !== -1) {
+      withoutPinned.splice(compactionIndex + 1, 0, ...pinnedBeforeCompaction)
+    }
+
+    return withoutPinned
+  }
+
   const compactionIndex = result.findLastIndex(
     (msg) =>
       msg.info.role === "user" &&
