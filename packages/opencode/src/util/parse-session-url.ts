@@ -7,7 +7,8 @@
  * - http://localhost:4096/ses_123/session/ses_123 -> { baseUrl: "http://localhost:4096", sessionId: "ses_123" }
  */
 export function parseSessionUrl(url: string): { baseUrl: string; sessionId?: string } {
-  const sessionMatch = url.match(/^(https?:\/\/[^\/]+)\/(ses_[a-zA-Z0-9]+)/)
+  // Match /session/ses_xxx or /ses_xxx format
+  const sessionMatch = url.match(/^(https?:\/\/[^\/]+)(?:\/session)?\/(ses_[a-zA-Z0-9]+)/)
 
   if (sessionMatch) {
     return {

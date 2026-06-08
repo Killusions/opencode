@@ -1421,6 +1421,22 @@ const layer = Layer.effect(
           })
         }
 
+        // Copilot patches model context sizes lower than reality. Override with
+        // models.dev limits so compaction uses the real context window.
+        for (const [providerID, provider] of Object.entries(database)) {
+          if (!providerID.includes("github-copilot")) continue
+          for (const [modelID, model] of Object.entries(provider.models)) {
+            const devProvider = modelsDev[providerID]
+            if (!devProvider) continue
+            const devModel = Object.values(devProvider.models).find(
+              (m) => m.id === modelID || m.name === modelID,
+            )
+            if (devModel?.limit?.context) {
+              model.limit.context = Math.floor(devModel.limit.context * 0.9)
+            }
+          }
+        }
+
         // extend database from config
         for (const [providerID, provider] of configProviders) {
           const existing = database[providerID]
