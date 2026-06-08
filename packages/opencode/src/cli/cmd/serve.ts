@@ -6,6 +6,7 @@ import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { Hono } from "hono"
 import { proxy } from "hono/proxy"
 import { Server } from "@/server/server"
+import { parseSessionUrl } from "@/util/parse-session-url"
 
 export const ServeCommand = effectCmd({
   command: "serve",
@@ -28,9 +29,12 @@ export const ServeCommand = effectCmd({
     let server: Awaited<ReturnType<typeof Server.listen>> | ReturnType<typeof Bun.serve> | undefined
     let baseUrl: string
     let remoteUrl: string | undefined
+    let sessionId: string | undefined
 
     if (args.attach) {
-      remoteUrl = args.attach
+      const parsed = parseSessionUrl(args.attach)
+      remoteUrl = parsed.baseUrl
+      sessionId = parsed.sessionId
       const opts = yield* resolveNetworkOptions(args)
 
       const app = new Hono()
@@ -58,32 +62,41 @@ export const ServeCommand = effectCmd({
       baseUrl = `http://${server.hostname}:${server.port}`
     }
 
-    if (args.prompt) {
+    if (args.prompt || sessionId) {
       const sdk = createOpencodeClient({ baseUrl: remoteUrl ?? baseUrl })
 
-      const session = yield* Effect.promise(() =>
-        sdk.session.create({ directory: process.cwd() }).then((res) => res.data),
-      )
-      if (!session) {
-        console.log(`opencode server listening on ${baseUrl}`)
-        yield* Effect.never
+      let actualSessionId: string
+
+      if (sessionId) {
+        actualSessionId = sessionId
+      } else {
+        const session = yield* Effect.promise(() =>
+          sdk.session.create({ directory: process.cwd() }).then((res) => res.data),
+        )
+        if (!session) {
+          console.log(`opencode server listening on ${baseUrl}`)
+          yield* Effect.never
+        }
+        actualSessionId = session!.id
       }
 
-      sdk.session
-        .prompt({
-          sessionID: session.id,
-          directory: process.cwd(),
-          parts: [
-            {
-              type: "text",
-              text: args.prompt,
-            },
-          ],
-        })
-        .catch(() => {})
+      if (args.prompt) {
+        sdk.session
+          .prompt({
+            sessionID: actualSessionId,
+            directory: process.cwd(),
+            parts: [
+              {
+                type: "text",
+                text: args.prompt,
+              },
+            ],
+          })
+          .catch(() => {})
+      }
 
       console.log(`opencode server listening on ${baseUrl}`)
-      console.log(`session created: ${baseUrl}/${session.id}/session/${session.id}`)
+      console.log(`session created: ${baseUrl}/${actualSessionId}/session/${actualSessionId}`)
     } else {
       console.log(`opencode server listening on ${baseUrl}`)
     }
