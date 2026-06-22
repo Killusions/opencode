@@ -957,14 +957,17 @@ export function Prompt(props: PromptProps) {
     if (workspace.creating() || move.creating()) return false
     if (auto()?.visible) return false
     if (!store.prompt.input) return false
-    const agent = local.agent.current()
+    const session = props.sessionID ? sync.session.get(props.sessionID) : undefined
+    const agent =
+      session?.parentID && lastUserMessage()?.agent ? { name: lastUserMessage()!.agent } : local.agent.current()
     if (!agent) return false
     const trimmed = store.prompt.input.trim()
     if (trimmed === "exit" || trimmed === "quit" || trimmed === ":q") {
       void exit()
       return true
     }
-    const selectedModel = local.model.current()
+    const selectedModel =
+      session?.parentID && lastUserMessage()?.model ? lastUserMessage()!.model : local.model.current()
     if (!selectedModel) {
       void promptModelWarning()
       return false

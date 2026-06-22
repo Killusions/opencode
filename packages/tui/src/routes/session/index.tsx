@@ -29,6 +29,7 @@ import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, TextAttributes, 
 import { Prompt, type PromptRef } from "../../component/prompt"
 import type {
   AssistantMessage,
+  Message,
   Part,
   Provider,
   ToolPart,
@@ -142,6 +143,10 @@ const sessionBindingCommands = [
   "session.parent",
   "session.child.next",
   "session.child.previous",
+  "session.subagent.prompt",
+  "session.subagent.cancel",
+  "session.subagent.toggle_preview",
+  "session.subagent.inspect",
 ] as const
 
 const sessionGlobalBindingCommands = [
@@ -168,7 +173,16 @@ const context = createContext<{
   providers: () => ReadonlyMap<string, Provider>
   sync: ReturnType<typeof useSync>
   tui: ReturnType<typeof useTuiConfig>
+  activeSubagent: () => SubagentTarget | undefined
+  setActiveSubagent: (target: SubagentTarget | undefined) => void
+  subagentPreviewOverrides: () => ReadonlyMap<string, boolean>
+  setSubagentPreviewOverride: (sessionID: string, expanded: boolean) => void
 }>()
+
+type SubagentTarget = {
+  sessionID: string
+  parentToolPartID: string
+}
 
 function use() {
   const ctx = useContext(context)
@@ -233,7 +247,7 @@ export function Session() {
     if (session()?.parentID) return []
     return children().flatMap((x) => sync.data.question[x.id] ?? [])
   })
-  const visible = createMemo(() => !session()?.parentID && permissions().length === 0 && questions().length === 0)
+  const visible = createMemo(() => permissions().length === 0 && questions().length === 0)
   const disabled = createMemo(() => permissions().length > 0 || questions().length > 0)
 
   const pending = createMemo(() => {
@@ -260,6 +274,8 @@ export function Session() {
   const [diffWrapMode] = kv.signal<"word" | "none">("diff_wrap_mode", "word")
   const [_animationsEnabled, _setAnimationsEnabled] = kv.signal("animations_enabled", true)
   const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
+  const [activeSubagent, setActiveSubagent] = createSignal<SubagentTarget>()
+  const [subagentPreviewOverrides, setSubagentPreviewOverrides] = createSignal(new Map<string, boolean>())
 
   const wide = createMemo(() => dimensions().width > 120)
   const sidebarVisible = createMemo(() => {
@@ -436,6 +452,74 @@ export function Session() {
   }
 
   const local = useLocal()
+
+  const subagentTasks = createMemo(() =>
+    messages().flatMap((message) =>
+      (sync.data.part[message.id] ?? []).flatMap((part) => {
+        if (part.type !== "tool" || part.tool !== "task") return []
+        const sessionID = subagentSessionID(part)
+        if (!sessionID) return []
+        return [{ sessionID, parentToolPartID: part.id, part }]
+      }),
+    ),
+  )
+
+  const targetSubagent = createMemo(() => {
+    const active = activeSubagent()
+    if (active) return active
+    const running = subagentTasks().findLast((task) =>
+      isSubagentTaskRunning(task.part, sync.data.session_status[task.sessionID]),
+    )
+    if (running) return { sessionID: running.sessionID, parentToolPartID: running.parentToolPartID }
+    const latest = subagentTasks().at(-1)
+    if (!latest) return
+    return { sessionID: latest.sessionID, parentToolPartID: latest.parentToolPartID }
+  })
+
+  const promptSessionID = createMemo(() => activeSubagent()?.sessionID ?? route.sessionID)
+
+  function setSubagentPreviewOverride(sessionID: string, expanded: boolean) {
+    setSubagentPreviewOverrides((previous) => {
+      const next = new Map(previous)
+      next.set(sessionID, expanded)
+      return next
+    })
+  }
+
+  function subagentLabel(target: SubagentTarget | undefined) {
+    const title = target ? sync.session.get(target.sessionID)?.title : undefined
+    const match = title?.match(/@([\w-]+) subagent/)
+    if (match) return Locale.titlecase(match[1])
+    return "Subagent"
+  }
+
+  function toggleSubagentPreview(target: SubagentTarget | undefined) {
+    if (!target) return
+    const task = subagentTasks().find((item) => item.sessionID === target.sessionID)
+    const current =
+      subagentPreviewOverrides().get(target.sessionID) ??
+      isSubagentTaskRunning(task?.part, sync.data.session_status[target.sessionID])
+    setSubagentPreviewOverride(target.sessionID, !current)
+  }
+
+  function promptSubagent(target: SubagentTarget | undefined) {
+    if (!target) return
+    setActiveSubagent(target)
+    prompt?.focus()
+    dialog.clear()
+  }
+
+  function inspectSubagent(target: SubagentTarget | undefined) {
+    if (!target) return
+    navigate({ type: "session", sessionID: target.sessionID })
+    dialog.clear()
+  }
+
+  function cancelSubagent(target: SubagentTarget | undefined) {
+    if (!target) return
+    void sdk.client.session.abort({ sessionID: target.sessionID })
+    dialog.clear()
+  }
 
   function enterChild(sessionID: string) {
     navigate({
@@ -1093,6 +1177,34 @@ export function Session() {
         moveChild(-1)
       }),
     },
+    {
+      title: "Prompt subagent",
+      value: "session.subagent.prompt",
+      category: "Session",
+      enabled: !!targetSubagent(),
+      run: () => promptSubagent(targetSubagent()),
+    },
+    {
+      title: "Cancel subagent",
+      value: "session.subagent.cancel",
+      category: "Session",
+      enabled: !!targetSubagent(),
+      run: () => cancelSubagent(targetSubagent()),
+    },
+    {
+      title: "Toggle subagent preview",
+      value: "session.subagent.toggle_preview",
+      category: "Session",
+      enabled: !!targetSubagent(),
+      run: () => toggleSubagentPreview(targetSubagent()),
+    },
+    {
+      title: "Inspect subagent",
+      value: "session.subagent.inspect",
+      category: "Session",
+      enabled: !!targetSubagent(),
+      run: () => inspectSubagent(targetSubagent()),
+    },
   ])
 
   const sessionCommands = createMemo(() =>
@@ -1129,6 +1241,32 @@ export function Session() {
     enabled: foregroundTasks().length > 0,
     priority: 1,
     bindings: tuiConfig.keybinds.get("session.background"),
+  }))
+
+  useBindings(() => ({
+    mode: OPENCODE_BASE_MODE,
+    enabled: !!targetSubagent() && renderer.currentFocusedEditor === null,
+    priority: 1,
+    bindings: tuiConfig.keybinds.gather("session.subagent", [
+      "session.subagent.prompt",
+      "session.subagent.cancel",
+      "session.subagent.toggle_preview",
+      "session.subagent.inspect",
+    ]),
+  }))
+
+  useBindings(() => ({
+    mode: OPENCODE_BASE_MODE,
+    enabled: !!activeSubagent(),
+    priority: 2,
+    bindings: [
+      {
+        key: "escape",
+        desc: "Clear subagent prompt target",
+        group: "Session",
+        cmd: () => setActiveSubagent(undefined),
+      },
+    ],
   }))
 
   const revertInfo = createMemo(() => session()?.revert)
@@ -1175,6 +1313,10 @@ export function Session() {
           providers,
           sync,
           tui: tuiConfig,
+          activeSubagent,
+          setActiveSubagent,
+          subagentPreviewOverrides,
+          setSubagentPreviewOverride,
         }}
       >
         <box flexDirection="row" flexGrow={1} minHeight={0}>
@@ -1311,10 +1453,24 @@ export function Session() {
                   <SubagentFooter />
                 </Show>
                 <Show when={visible()}>
+                  <Show when={activeSubagent()}>
+                    {(target) => (
+                      <box
+                        flexDirection="row"
+                        marginBottom={1}
+                        backgroundColor={theme.backgroundPanel}
+                        paddingLeft={1}
+                        paddingRight={1}
+                        onMouseUp={() => setActiveSubagent(undefined)}
+                      >
+                        <text fg={theme.textMuted}>Sending to {subagentLabel(target())} subagent · Esc to clear</text>
+                      </box>
+                    )}
+                  </Show>
                   <pluginRuntime.Slot
                     name="session_prompt"
                     mode="replace"
-                    session_id={route.sessionID}
+                    session_id={promptSessionID()}
                     visible={visible()}
                     disabled={disabled()}
                     on_submit={toBottom}
@@ -1327,8 +1483,8 @@ export function Session() {
                       onSubmit={() => {
                         toBottom()
                       }}
-                      sessionID={route.sessionID}
-                      right={<pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
+                      sessionID={promptSessionID()}
+                      right={<pluginRuntime.Slot name="session_prompt_right" session_id={promptSessionID()} />}
                     />
                   </pluginRuntime.Slot>
                 </Show>
@@ -2230,13 +2386,14 @@ function Task(props: ToolProps) {
   const { navigate } = useRoute()
   const sync = useSync()
   const dialog = useDialog()
+  const ctx = use()
 
   onMount(() => {
-    const sessionID = stringValue(props.metadata.sessionId)
-    if (sessionID && !sync.data.message[sessionID]?.length) void sync.session.sync(sessionID)
+    const sessionID = subagentSessionID(props.part)
+    if (sessionID) void sync.session.sync(sessionID)
   })
 
-  const sessionID = createMemo(() => stringValue(props.metadata.sessionId))
+  const sessionID = createMemo(() => subagentSessionID(props.part))
   const messages = createMemo(() => sync.data.message[sessionID() ?? ""] ?? [])
 
   const tools = createMemo(() => {
@@ -2252,18 +2409,20 @@ function Task(props: ToolProps) {
   )
 
   const status = createMemo(() => sync.data.session_status[sessionID() ?? ""])
-  const isRunning = createMemo(() => {
-    const value = status()
-    return (
-      props.part.state.status === "running" ||
-      (props.metadata.background === true && value !== undefined && value.type !== "idle")
-    )
+  const isRunning = createMemo(() => isSubagentTaskRunning(props.part, status()))
+  const previewExpanded = createMemo(() => {
+    const id = sessionID()
+    if (!id) return false
+    return ctx.subagentPreviewOverrides().get(id) ?? (isRunning() && props.metadata.background !== true)
   })
   const retry = createMemo(() => {
     const value = status()
     if (value?.type !== "retry") return
     return value
   })
+  const canceled = createMemo(() =>
+    messages().some((message) => message.role === "assistant" && message.error?.name === "MessageAbortedError"),
+  )
 
   const duration = createMemo(() => {
     const first = messages().find((x) => x.role === "user")?.time.created
@@ -2294,33 +2453,150 @@ function Task(props: ToolProps) {
       } else content.push(`↳ ${formatSubagentToolcalls(tools().length)}`)
     }
 
-    if (!isRunning() && props.part.state.status === "completed") {
+    if (!isRunning() && canceled()) {
+      content.push("↳ canceled")
+    } else if (!isRunning() && props.part.state.status === "completed") {
       content.push(`↳ ${formatCompletedSubagentDetail(tools().length, Locale.duration(duration()))}`)
     }
 
     return content.join("\n")
   })
 
+  function target() {
+    const id = sessionID()
+    if (!id) return
+    return { sessionID: id, parentToolPartID: props.part.id }
+  }
+
+  function inspect() {
+    const id = sessionID()
+    if (!id) return
+    navigate({ type: "session", sessionID: id })
+    const status = retry()
+    if (status) void DialogAlert.show(dialog, "Retry Error", status.message)
+  }
+
+  function togglePreview() {
+    const id = sessionID()
+    if (!id) return
+    ctx.setSubagentPreviewOverride(id, !previewExpanded())
+  }
+
   return (
-    <InlineTool
-      icon={props.part.state.status === "completed" ? "✓" : "│"}
-      separate={true}
-      color={retry() ? theme.error : undefined}
-      spinner={isRunning()}
-      complete={stringValue(props.input.description)}
-      pending="Delegating..."
-      part={props.part}
-      onClick={() => {
-        if (sessionID()) {
-          navigate({ type: "session", sessionID: sessionID()! })
-        }
-        const status = retry()
-        if (status) void DialogAlert.show(dialog, "Retry Error", status.message)
-      }}
-    >
-      {content()}
-    </InlineTool>
+    <box>
+      <InlineTool
+        icon={canceled() ? "×" : props.part.state.status === "completed" ? "✓" : "│"}
+        subagent={true}
+        color={retry() ? theme.error : undefined}
+        spinner={isRunning()}
+        complete={stringValue(props.input.description)}
+        pending="Delegating..."
+        part={props.part}
+        onClick={() => {
+          inspect()
+          const status = retry()
+          if (status) void DialogAlert.show(dialog, "Retry Error", status.message)
+        }}
+      >
+        {content()}
+      </InlineTool>
+      <Show when={previewExpanded() ? sessionID() : undefined}>
+        {(id) => (
+          <SubagentPreview
+            sessionID={id()}
+            active={ctx.activeSubagent()?.sessionID === id()}
+            onPrompt={() => {
+              const value = target()
+              if (value) ctx.setActiveSubagent(value)
+            }}
+            onToggle={togglePreview}
+            onInspect={inspect}
+          />
+        )}
+      </Show>
+    </box>
   )
+}
+
+function SubagentPreview(props: {
+  sessionID: string
+  active: boolean
+  onPrompt: () => void
+  onToggle: () => void
+  onInspect: () => void
+}) {
+  const { theme } = useTheme()
+  const sync = useSync()
+  const messages = createMemo(() => sync.data.message[props.sessionID] ?? [])
+  const events = createMemo(() => subagentPreviewEvents(messages(), sync.data.part, 6))
+
+  return (
+    <box paddingLeft={6} marginTop={1} gap={1} border={["left"]} borderColor={theme.backgroundPanel}>
+      <Show when={props.active}>
+        <text fg={theme.textMuted}>Sending follow-ups here</text>
+      </Show>
+      <Show when={events().length > 0} fallback={<text fg={theme.textMuted}>Loading subagent transcript...</text>}>
+        <For each={events()}>
+          {(event) => (
+            <text fg={event.tone === "strong" ? theme.text : theme.textMuted} wrapMode="word">
+              {event.text}
+            </text>
+          )}
+        </For>
+      </Show>
+      <text fg={theme.textMuted}>p prompt · x cancel · tab collapse · enter inspect</text>
+    </box>
+  )
+}
+
+type SubagentPreviewEvent = {
+  text: string
+  tone?: "strong"
+}
+
+function subagentPreviewEvents(messages: Message[], partsByMessage: Record<string, Part[]>, limit: number) {
+  return messages
+    .flatMap((message): SubagentPreviewEvent[] => {
+      const parts = partsByMessage[message.id] ?? []
+      if (message.role === "user") {
+        return parts
+          .filter((part): part is TextPart => part.type === "text" && !part.synthetic && !part.ignored)
+          .map((part) => ({
+            text: `You: ${Locale.truncate(part.text.trim().replaceAll("\n", " "), 120)}`,
+            tone: "strong",
+          }))
+      }
+      return parts.flatMap((part): SubagentPreviewEvent[] => {
+        if (part.type === "text" && part.text.trim()) {
+          return [{ text: `Subagent: ${Locale.truncate(part.text.trim().replaceAll("\n", " "), 160)}` }]
+        }
+        if (part.type !== "tool") return []
+        if (part.state.status === "running") {
+          return [{ text: `↳ ${Locale.titlecase(part.tool)} ${part.state.title ?? "running"}` }]
+        }
+        if (part.state.status === "completed" && part.state.title) {
+          return [{ text: `↳ ${Locale.titlecase(part.tool)} ${part.state.title}` }]
+        }
+        if (part.state.status === "error") {
+          return [{ text: `↳ ${Locale.titlecase(part.tool)} canceled or failed` }]
+        }
+        return []
+      })
+    })
+    .filter((event) => event.text.trim().length > 0)
+    .slice(-limit)
+}
+
+function subagentSessionID(part: ToolPart) {
+  const metadata =
+    part.state.status === "running" || part.state.status === "completed" ? part.state.metadata : undefined
+  return stringValue(metadata?.sessionId) ?? stringValue(metadata?.sessionID) ?? stringValue(part.metadata?.sessionId)
+}
+
+function isSubagentTaskRunning(part: ToolPart | undefined, status: SessionStatus | undefined) {
+  if (part?.state.status === "running") return true
+  const background = part?.state.status === "completed" ? part.state.metadata?.background : undefined
+  return background === true && status !== undefined && status.type !== "idle"
 }
 
 export function formatSubagentToolcalls(count: number) {
