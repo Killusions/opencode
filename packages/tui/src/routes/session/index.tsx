@@ -143,10 +143,6 @@ const sessionBindingCommands = [
   "session.parent",
   "session.child.next",
   "session.child.previous",
-  "session.subagent.prompt",
-  "session.subagent.cancel",
-  "session.subagent.toggle_preview",
-  "session.subagent.inspect",
 ] as const
 
 const sessionGlobalBindingCommands = [
@@ -173,15 +169,12 @@ const context = createContext<{
   providers: () => ReadonlyMap<string, Provider>
   sync: ReturnType<typeof useSync>
   tui: ReturnType<typeof useTuiConfig>
-  activeSubagent: () => SubagentTarget | undefined
-  setActiveSubagent: (target: SubagentTarget | undefined) => void
   subagentPreviewOverrides: () => ReadonlyMap<string, boolean>
   setSubagentPreviewOverride: (sessionID: string, expanded: boolean) => void
 }>()
 
 type SubagentTarget = {
   sessionID: string
-  parentToolPartID: string
 }
 
 function use() {
@@ -274,7 +267,6 @@ export function Session() {
   const [diffWrapMode] = kv.signal<"word" | "none">("diff_wrap_mode", "word")
   const [_animationsEnabled, _setAnimationsEnabled] = kv.signal("animations_enabled", true)
   const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
-  const [activeSubagent, setActiveSubagent] = createSignal<SubagentTarget>()
   const [subagentPreviewOverrides, setSubagentPreviewOverrides] = createSignal(new Map<string, boolean>())
 
   const wide = createMemo(() => dimensions().width > 120)
@@ -459,24 +451,20 @@ export function Session() {
         if (part.type !== "tool" || part.tool !== "task") return []
         const sessionID = subagentSessionID(part)
         if (!sessionID) return []
-        return [{ sessionID, parentToolPartID: part.id, part }]
+        return [{ sessionID, part }]
       }),
     ),
   )
 
   const targetSubagent = createMemo(() => {
-    const active = activeSubagent()
-    if (active) return active
     const running = subagentTasks().findLast((task) =>
       isSubagentTaskRunning(task.part, sync.data.session_status[task.sessionID]),
     )
-    if (running) return { sessionID: running.sessionID, parentToolPartID: running.parentToolPartID }
+    if (running) return { sessionID: running.sessionID }
     const latest = subagentTasks().at(-1)
     if (!latest) return
-    return { sessionID: latest.sessionID, parentToolPartID: latest.parentToolPartID }
+    return { sessionID: latest.sessionID }
   })
-
-  const promptSessionID = createMemo(() => activeSubagent()?.sessionID ?? route.sessionID)
 
   function setSubagentPreviewOverride(sessionID: string, expanded: boolean) {
     setSubagentPreviewOverrides((previous) => {
@@ -486,13 +474,6 @@ export function Session() {
     })
   }
 
-  function subagentLabel(target: SubagentTarget | undefined) {
-    const title = target ? sync.session.get(target.sessionID)?.title : undefined
-    const match = title?.match(/@([\w-]+) subagent/)
-    if (match) return Locale.titlecase(match[1])
-    return "Subagent"
-  }
-
   function toggleSubagentPreview(target: SubagentTarget | undefined) {
     if (!target) return
     const task = subagentTasks().find((item) => item.sessionID === target.sessionID)
@@ -500,13 +481,6 @@ export function Session() {
       subagentPreviewOverrides().get(target.sessionID) ??
       isSubagentTaskRunning(task?.part, sync.data.session_status[target.sessionID])
     setSubagentPreviewOverride(target.sessionID, !current)
-  }
-
-  function promptSubagent(target: SubagentTarget | undefined) {
-    if (!target) return
-    setActiveSubagent(target)
-    prompt?.focus()
-    dialog.clear()
   }
 
   function inspectSubagent(target: SubagentTarget | undefined) {
@@ -1178,13 +1152,6 @@ export function Session() {
       }),
     },
     {
-      title: "Prompt subagent",
-      value: "session.subagent.prompt",
-      category: "Session",
-      enabled: !!targetSubagent(),
-      run: () => promptSubagent(targetSubagent()),
-    },
-    {
       title: "Cancel subagent",
       value: "session.subagent.cancel",
       category: "Session",
@@ -1243,32 +1210,6 @@ export function Session() {
     bindings: tuiConfig.keybinds.get("session.background"),
   }))
 
-  useBindings(() => ({
-    mode: OPENCODE_BASE_MODE,
-    enabled: !!targetSubagent() && renderer.currentFocusedEditor === null,
-    priority: 1,
-    bindings: tuiConfig.keybinds.gather("session.subagent", [
-      "session.subagent.prompt",
-      "session.subagent.cancel",
-      "session.subagent.toggle_preview",
-      "session.subagent.inspect",
-    ]),
-  }))
-
-  useBindings(() => ({
-    mode: OPENCODE_BASE_MODE,
-    enabled: !!activeSubagent(),
-    priority: 2,
-    bindings: [
-      {
-        key: "escape",
-        desc: "Clear subagent prompt target",
-        group: "Session",
-        cmd: () => setActiveSubagent(undefined),
-      },
-    ],
-  }))
-
   const revertInfo = createMemo(() => session()?.revert)
   const revertMessageID = createMemo(() => revertInfo()?.messageID)
 
@@ -1313,8 +1254,6 @@ export function Session() {
           providers,
           sync,
           tui: tuiConfig,
-          activeSubagent,
-          setActiveSubagent,
           subagentPreviewOverrides,
           setSubagentPreviewOverride,
         }}
@@ -1453,24 +1392,10 @@ export function Session() {
                   <SubagentFooter />
                 </Show>
                 <Show when={visible()}>
-                  <Show when={activeSubagent()}>
-                    {(target) => (
-                      <box
-                        flexDirection="row"
-                        marginBottom={1}
-                        backgroundColor={theme.backgroundPanel}
-                        paddingLeft={1}
-                        paddingRight={1}
-                        onMouseUp={() => setActiveSubagent(undefined)}
-                      >
-                        <text fg={theme.textMuted}>Sending to {subagentLabel(target())} subagent · Esc to clear</text>
-                      </box>
-                    )}
-                  </Show>
                   <pluginRuntime.Slot
                     name="session_prompt"
                     mode="replace"
-                    session_id={promptSessionID()}
+                    session_id={route.sessionID}
                     visible={visible()}
                     disabled={disabled()}
                     on_submit={toBottom}
@@ -1483,8 +1408,8 @@ export function Session() {
                       onSubmit={() => {
                         toBottom()
                       }}
-                      sessionID={promptSessionID()}
-                      right={<pluginRuntime.Slot name="session_prompt_right" session_id={promptSessionID()} />}
+                      sessionID={route.sessionID}
+                      right={<pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
                     />
                   </pluginRuntime.Slot>
                 </Show>
@@ -2462,12 +2387,6 @@ function Task(props: ToolProps) {
     return content.join("\n")
   })
 
-  function target() {
-    const id = sessionID()
-    if (!id) return
-    return { sessionID: id, parentToolPartID: props.part.id }
-  }
-
   function inspect() {
     const id = sessionID()
     if (!id) return
@@ -2501,30 +2420,13 @@ function Task(props: ToolProps) {
         {content()}
       </InlineTool>
       <Show when={previewExpanded() ? sessionID() : undefined}>
-        {(id) => (
-          <SubagentPreview
-            sessionID={id()}
-            active={ctx.activeSubagent()?.sessionID === id()}
-            onPrompt={() => {
-              const value = target()
-              if (value) ctx.setActiveSubagent(value)
-            }}
-            onToggle={togglePreview}
-            onInspect={inspect}
-          />
-        )}
+        {(id) => <SubagentPreview sessionID={id()} onToggle={togglePreview} onInspect={inspect} />}
       </Show>
     </box>
   )
 }
 
-function SubagentPreview(props: {
-  sessionID: string
-  active: boolean
-  onPrompt: () => void
-  onToggle: () => void
-  onInspect: () => void
-}) {
+function SubagentPreview(props: { sessionID: string; onToggle: () => void; onInspect: () => void }) {
   const { theme } = useTheme()
   const sync = useSync()
   const messages = createMemo(() => sync.data.message[props.sessionID] ?? [])
@@ -2532,9 +2434,6 @@ function SubagentPreview(props: {
 
   return (
     <box paddingLeft={6} marginTop={1} gap={1} border={["left"]} borderColor={theme.backgroundPanel}>
-      <Show when={props.active}>
-        <text fg={theme.textMuted}>Sending follow-ups here</text>
-      </Show>
       <Show when={events().length > 0} fallback={<text fg={theme.textMuted}>Loading subagent transcript...</text>}>
         <For each={events()}>
           {(event) => (
@@ -2544,7 +2443,7 @@ function SubagentPreview(props: {
           )}
         </For>
       </Show>
-      <text fg={theme.textMuted}>p prompt · x cancel · tab collapse · enter inspect</text>
+      <text fg={theme.textMuted}>x cancel · tab collapse · enter inspect</text>
     </box>
   )
 }
