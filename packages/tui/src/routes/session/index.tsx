@@ -29,7 +29,6 @@ import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, TextAttributes, 
 import { Prompt, type PromptRef } from "../../component/prompt"
 import type {
   AssistantMessage,
-  Message,
   Part,
   Provider,
   ToolPart,
@@ -169,13 +168,7 @@ const context = createContext<{
   providers: () => ReadonlyMap<string, Provider>
   sync: ReturnType<typeof useSync>
   tui: ReturnType<typeof useTuiConfig>
-  subagentPreviewOverrides: () => ReadonlyMap<string, boolean>
-  setSubagentPreviewOverride: (sessionID: string, expanded: boolean) => void
 }>()
-
-type SubagentTarget = {
-  sessionID: string
-}
 
 function use() {
   const ctx = useContext(context)
@@ -267,7 +260,6 @@ export function Session() {
   const [diffWrapMode] = kv.signal<"word" | "none">("diff_wrap_mode", "word")
   const [_animationsEnabled, _setAnimationsEnabled] = kv.signal("animations_enabled", true)
   const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
-  const [subagentPreviewOverrides, setSubagentPreviewOverrides] = createSignal(new Map<string, boolean>())
 
   const wide = createMemo(() => dimensions().width > 120)
   const sidebarVisible = createMemo(() => {
@@ -444,56 +436,6 @@ export function Session() {
   }
 
   const local = useLocal()
-
-  const subagentTasks = createMemo(() =>
-    messages().flatMap((message) =>
-      (sync.data.part[message.id] ?? []).flatMap((part) => {
-        if (part.type !== "tool" || part.tool !== "task") return []
-        const sessionID = subagentSessionID(part)
-        if (!sessionID) return []
-        return [{ sessionID, part }]
-      }),
-    ),
-  )
-
-  const targetSubagent = createMemo(() => {
-    const running = subagentTasks().findLast((task) =>
-      isSubagentTaskRunning(task.part, sync.data.session_status[task.sessionID]),
-    )
-    if (running) return { sessionID: running.sessionID }
-    const latest = subagentTasks().at(-1)
-    if (!latest) return
-    return { sessionID: latest.sessionID }
-  })
-
-  function setSubagentPreviewOverride(sessionID: string, expanded: boolean) {
-    setSubagentPreviewOverrides((previous) => {
-      const next = new Map(previous)
-      next.set(sessionID, expanded)
-      return next
-    })
-  }
-
-  function toggleSubagentPreview(target: SubagentTarget | undefined) {
-    if (!target) return
-    const task = subagentTasks().find((item) => item.sessionID === target.sessionID)
-    const current =
-      subagentPreviewOverrides().get(target.sessionID) ??
-      isSubagentTaskRunning(task?.part, sync.data.session_status[target.sessionID])
-    setSubagentPreviewOverride(target.sessionID, !current)
-  }
-
-  function inspectSubagent(target: SubagentTarget | undefined) {
-    if (!target) return
-    navigate({ type: "session", sessionID: target.sessionID })
-    dialog.clear()
-  }
-
-  function cancelSubagent(target: SubagentTarget | undefined) {
-    if (!target) return
-    void sdk.client.session.abort({ sessionID: target.sessionID })
-    dialog.clear()
-  }
 
   function enterChild(sessionID: string) {
     navigate({
@@ -1151,27 +1093,6 @@ export function Session() {
         moveChild(-1)
       }),
     },
-    {
-      title: "Cancel subagent",
-      value: "session.subagent.cancel",
-      category: "Session",
-      enabled: !!targetSubagent(),
-      run: () => cancelSubagent(targetSubagent()),
-    },
-    {
-      title: "Toggle subagent preview",
-      value: "session.subagent.toggle_preview",
-      category: "Session",
-      enabled: !!targetSubagent(),
-      run: () => toggleSubagentPreview(targetSubagent()),
-    },
-    {
-      title: "Inspect subagent",
-      value: "session.subagent.inspect",
-      category: "Session",
-      enabled: !!targetSubagent(),
-      run: () => inspectSubagent(targetSubagent()),
-    },
   ])
 
   const sessionCommands = createMemo(() =>
@@ -1254,8 +1175,6 @@ export function Session() {
           providers,
           sync,
           tui: tuiConfig,
-          subagentPreviewOverrides,
-          setSubagentPreviewOverride,
         }}
       >
         <box flexDirection="row" flexGrow={1} minHeight={0}>
@@ -1931,6 +1850,7 @@ function InlineTool(props: {
   failure?: string
   spinner?: boolean
   separate?: boolean
+  subagent?: boolean
   children: JSX.Element
   part: ToolPart
   onClick?: () => void
@@ -1983,6 +1903,7 @@ function InlineTool(props: {
       pending={props.pending}
       failure={props.failure}
       spinner={props.spinner}
+      subagent={props.subagent}
       separate={props.separate}
       onMouseOver={() => clickable() && setHover(true)}
       onMouseOut={() => setHover(false)}
@@ -2001,6 +1922,7 @@ function InlineTool(props: {
 }
 
 export function InlineToolRow(props: {
+  id?: string
   icon: string
   iconColor?: RGBA
   color?: RGBA
@@ -2013,23 +1935,30 @@ export function InlineToolRow(props: {
   pending: string
   failure?: string
   spinner?: boolean
-  separate?: boolean
+  subagent?: boolean
   children: JSX.Element
+  separate?: boolean
   onMouseOver?: () => void
   onMouseOut?: () => void
   onMouseUp?: () => void
 }) {
   return (
     <box
+      id={props.id}
       paddingLeft={3}
       onMouseOver={props.onMouseOver}
       onMouseOut={props.onMouseOut}
       onMouseUp={props.onMouseUp}
       ref={(el: BoxRenderable) => {
-        if (props.separate) alwaysSeparate.add(el)
         setPreLayoutSiblingMargin(el, (previous) => {
-          return props.separate ||
-            (previous instanceof BoxRenderable && (previous.height > 1 || alwaysSeparate.has(previous)))
+          const previousInline = previous?.id.startsWith("tool-inline-") ?? false
+          const previousSubagent = previous?.id.startsWith("tool-inline-subagent-") ?? false
+          return previous?.id.startsWith("text-") ||
+            previous?.id.startsWith("tool-block-") ||
+            previous?.id.startsWith("assistant-error-") ||
+            previous?.id.startsWith("assistant-summary-") ||
+            (previousInline && previousSubagent !== Boolean(props.subagent)) ||
+            props.separate
             ? 1
             : 0
         })
@@ -2311,7 +2240,6 @@ function Task(props: ToolProps) {
   const { navigate } = useRoute()
   const sync = useSync()
   const dialog = useDialog()
-  const ctx = use()
 
   onMount(() => {
     const sessionID = subagentSessionID(props.part)
@@ -2335,11 +2263,6 @@ function Task(props: ToolProps) {
 
   const status = createMemo(() => sync.data.session_status[sessionID() ?? ""])
   const isRunning = createMemo(() => isSubagentTaskRunning(props.part, status()))
-  const previewExpanded = createMemo(() => {
-    const id = sessionID()
-    if (!id) return false
-    return ctx.subagentPreviewOverrides().get(id) ?? (isRunning() && props.metadata.background !== true)
-  })
   const retry = createMemo(() => {
     const value = status()
     if (value?.type !== "retry") return
@@ -2371,10 +2294,17 @@ function Task(props: ToolProps) {
     if (isRunning() && retrying) {
       content.push(`↳ ${formatSubagentRetry(retrying.attempt, Locale.truncate(retrying.message, 80))}`)
     } else if (isRunning() && tools().length > 0) {
-      if (current()) {
-        const state = current()!.state
-        const title = state.status === "running" || state.status === "completed" ? state.title : undefined
-        content.push(`↳ ${Locale.titlecase(current()!.tool)} ${title}`)
+      const meaningfulTools = tools()
+        .filter((item) => (item.state.status === "running" || item.state.status === "completed") && item.state.title)
+        .slice(-3)
+      if (meaningfulTools.length > 0) {
+        content.push(
+          ...meaningfulTools.map((item) => {
+            const title =
+              item.state.status === "running" || item.state.status === "completed" ? item.state.title : undefined
+            return `↳ ${Locale.titlecase(item.tool)} ${title}`
+          }),
+        )
       } else content.push(`↳ ${formatSubagentToolcalls(tools().length)}`)
     }
 
@@ -2395,95 +2325,20 @@ function Task(props: ToolProps) {
     if (status) void DialogAlert.show(dialog, "Retry Error", status.message)
   }
 
-  function togglePreview() {
-    const id = sessionID()
-    if (!id) return
-    ctx.setSubagentPreviewOverride(id, !previewExpanded())
-  }
-
   return (
-    <box>
-      <InlineTool
-        icon={canceled() ? "×" : props.part.state.status === "completed" ? "✓" : "│"}
-        subagent={true}
-        color={retry() ? theme.error : undefined}
-        spinner={isRunning()}
-        complete={stringValue(props.input.description)}
-        pending="Delegating..."
-        part={props.part}
-        onClick={() => {
-          inspect()
-          const status = retry()
-          if (status) void DialogAlert.show(dialog, "Retry Error", status.message)
-        }}
-      >
-        {content()}
-      </InlineTool>
-      <Show when={previewExpanded() ? sessionID() : undefined}>
-        {(id) => <SubagentPreview sessionID={id()} onToggle={togglePreview} onInspect={inspect} />}
-      </Show>
-    </box>
+    <InlineTool
+      icon={canceled() ? "×" : props.part.state.status === "completed" ? "✓" : "│"}
+      subagent={true}
+      color={retry() ? theme.error : undefined}
+      spinner={isRunning()}
+      complete={stringValue(props.input.description)}
+      pending="Delegating..."
+      part={props.part}
+      onClick={inspect}
+    >
+      {content()}
+    </InlineTool>
   )
-}
-
-function SubagentPreview(props: { sessionID: string; onToggle: () => void; onInspect: () => void }) {
-  const { theme } = useTheme()
-  const sync = useSync()
-  const messages = createMemo(() => sync.data.message[props.sessionID] ?? [])
-  const events = createMemo(() => subagentPreviewEvents(messages(), sync.data.part, 6))
-
-  return (
-    <box paddingLeft={6} marginTop={1} gap={1} border={["left"]} borderColor={theme.backgroundPanel}>
-      <Show when={events().length > 0} fallback={<text fg={theme.textMuted}>Loading subagent transcript...</text>}>
-        <For each={events()}>
-          {(event) => (
-            <text fg={event.tone === "strong" ? theme.text : theme.textMuted} wrapMode="word">
-              {event.text}
-            </text>
-          )}
-        </For>
-      </Show>
-      <text fg={theme.textMuted}>x cancel · tab collapse · enter inspect</text>
-    </box>
-  )
-}
-
-type SubagentPreviewEvent = {
-  text: string
-  tone?: "strong"
-}
-
-function subagentPreviewEvents(messages: Message[], partsByMessage: Record<string, Part[]>, limit: number) {
-  return messages
-    .flatMap((message): SubagentPreviewEvent[] => {
-      const parts = partsByMessage[message.id] ?? []
-      if (message.role === "user") {
-        return parts
-          .filter((part): part is TextPart => part.type === "text" && !part.synthetic && !part.ignored)
-          .map((part) => ({
-            text: `You: ${Locale.truncate(part.text.trim().replaceAll("\n", " "), 120)}`,
-            tone: "strong",
-          }))
-      }
-      return parts.flatMap((part): SubagentPreviewEvent[] => {
-        if (part.type === "text" && part.text.trim()) {
-          return [{ text: `Subagent: ${Locale.truncate(part.text.trim().replaceAll("\n", " "), 160)}` }]
-        }
-        if (part.type !== "tool") return []
-        if (part.state.status === "running") {
-          return [{ text: `↳ ${Locale.titlecase(part.tool)} ${part.state.title ?? "running"}` }]
-        }
-        if (part.state.status === "completed" && part.state.title) {
-          return [{ text: `↳ ${Locale.titlecase(part.tool)} ${part.state.title}` }]
-        }
-        if (part.state.status === "error") {
-          return [{ text: `↳ ${Locale.titlecase(part.tool)} canceled or failed` }]
-        }
-        return []
-      })
-    })
-    .filter((event) => event.text.trim().length > 0)
-    .slice(-limit)
 }
 
 function subagentSessionID(part: ToolPart) {
