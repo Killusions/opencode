@@ -10,11 +10,16 @@ export const AcpCommand = effectCmd({
   command: "acp",
   describe: "start ACP (Agent Client Protocol) server",
   builder: (yargs) => {
-    return withNetworkOptions(yargs).option("cwd", {
-      describe: "working directory",
-      type: "string",
-      default: process.cwd(),
-    })
+    return withNetworkOptions(yargs)
+      .option("cwd", {
+        describe: "working directory",
+        type: "string",
+        default: process.cwd(),
+      })
+      .option("prompt", {
+        describe: "prompt to use",
+        type: "string",
+      })
   },
   handler: Effect.fn("Cli.acp")(function* (args) {
     const { Server } = yield* Effect.promise(() => import("@/server/server"))
@@ -53,7 +58,7 @@ export const AcpCommand = effectCmd({
     })
 
     const stream = ndJsonStream(input, output)
-    const agent = ACP.init({ sdk })
+    const agent = ACP.init({ sdk, initialPrompt: args.prompt })
 
     new AgentSideConnection((conn) => {
       ACPProfile.mark("cli.acp.connection.create")

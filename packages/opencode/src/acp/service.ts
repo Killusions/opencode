@@ -79,6 +79,7 @@ export function make(input: {
   session?: ACPSession.Interface
   usage?: UsageService.Interface
   eventSubscription?: (subscription: ACPEvent.Subscription) => void
+  initialPrompt?: string
 }): Interface {
   const session = input.session ?? makeSessionService()
   const directoryService = input.directory ?? makeDirectoryService(input.sdk)
@@ -202,6 +203,32 @@ export function make(input: {
         modeId: state.modeId,
       }),
     }
+
+    if (input.initialPrompt) {
+      const directory = params.cwd
+      const model = state.model ?? selected
+      const agent = state.modeId ?? (snapshot.availableModes.length > 0 ? snapshot.defaultModeID : undefined)
+      input.sdk.session
+        .prompt({
+          sessionID: state.id,
+          directory,
+          model: {
+            providerID: model.providerID,
+            modelID: model.modelID,
+          },
+          ...(agent ? { agent } : {}),
+          parts: [
+            {
+              type: "text",
+              text: input.initialPrompt,
+            },
+          ],
+        })
+        .catch((err) => {
+          log.error("failed to send initial prompt", { error: err, sessionId: state.id })
+        })
+    }
+
     ACPProfile.duration("acp.newSession", started)
     return response
   })
