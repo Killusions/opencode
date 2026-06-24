@@ -135,7 +135,7 @@ Rules:
 - Export a domain-level `Error` union from service modules.
 - In `Effect.gen` / `Effect.fn`, prefer `yield* new MyError(...)` for
   direct expected failures.
-- Use `Schema.Defect` for unknown cause fields.
+- Use `Schema.Defect()` for unknown cause fields.
 - Use `Effect.try(...)`, `Effect.tryPromise(...)`, `Effect.mapError`,
   `Effect.catchTag`, and `Effect.catchTags` to translate external
   failures into domain errors.
