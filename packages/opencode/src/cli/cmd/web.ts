@@ -5,6 +5,7 @@ import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import open from "open"
 import { networkInterfaces } from "os"
+import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 
 function getNetworkIPs() {
   const nets = networkInterfaces()
@@ -30,7 +31,12 @@ function getNetworkIPs() {
 
 export const WebCommand = effectCmd({
   command: "web",
-  builder: (yargs) => withNetworkOptions(yargs),
+  builder: (yargs) => {
+    return withNetworkOptions(yargs).option("prompt", {
+      describe: "prompt to use",
+      type: "string",
+    })
+  },
   describe: "start opencode server and open web interface",
   // Server loads instances per-request via x-opencode-directory header — no
   // ambient project InstanceContext needed at startup.
@@ -46,37 +52,72 @@ export const WebCommand = effectCmd({
     UI.println(UI.logo("  "))
     UI.empty()
 
-    if (opts.hostname === "0.0.0.0") {
-      // Show localhost for local access
-      const localhostUrl = `http://localhost:${server.port}`
-      UI.println(UI.Style.TEXT_INFO_BOLD + "  Local access:      ", UI.Style.TEXT_NORMAL, localhostUrl)
+    const baseUrl = opts.hostname === "0.0.0.0" ? `http://localhost:${server.port}` : server.url.toString()
 
-      // Show network IPs for remote access
-      const networkIPs = getNetworkIPs()
-      if (networkIPs.length > 0) {
-        for (const ip of networkIPs) {
+    if (args.prompt) {
+      const sdk = createOpencodeClient({ baseUrl })
+
+      const session = yield* Effect.promise(() =>
+        sdk.session.create({ directory: process.cwd() }).then((res) => res.data),
+      )
+      if (!session) {
+        UI.println(UI.Style.TEXT_INFO_BOLD + "  Web interface:    ", UI.Style.TEXT_NORMAL, baseUrl)
+        open(baseUrl).catch(() => {})
+        yield* Effect.never
+      }
+
+      const sessionUrl = `${baseUrl}/${session.id}/session/${session.id}`
+
+      sdk.session
+        .prompt({
+          sessionID: session.id,
+          directory: process.cwd(),
+          parts: [
+            {
+              type: "text",
+              text: args.prompt,
+            },
+          ],
+        })
+        .catch(() => {})
+
+      UI.println(UI.Style.TEXT_INFO_BOLD + "  Session URL:       ", UI.Style.TEXT_NORMAL, sessionUrl)
+      UI.empty()
+
+      open(sessionUrl).catch(() => {})
+    } else {
+      if (opts.hostname === "0.0.0.0") {
+        // Show localhost for local access
+        const localhostUrl = `http://localhost:${server.port}`
+        UI.println(UI.Style.TEXT_INFO_BOLD + "  Local access:      ", UI.Style.TEXT_NORMAL, localhostUrl)
+
+        // Show network IPs for remote access
+        const networkIPs = getNetworkIPs()
+        if (networkIPs.length > 0) {
+          for (const ip of networkIPs) {
+            UI.println(
+              UI.Style.TEXT_INFO_BOLD + "  Network access:    ",
+              UI.Style.TEXT_NORMAL,
+              `http://${ip}:${server.port}`,
+            )
+          }
+        }
+
+        if (opts.mdns) {
           UI.println(
-            UI.Style.TEXT_INFO_BOLD + "  Network access:    ",
+            UI.Style.TEXT_INFO_BOLD + "  mDNS:              ",
             UI.Style.TEXT_NORMAL,
-            `http://${ip}:${server.port}`,
+            `${opts.mdnsDomain}:${server.port}`,
           )
         }
-      }
 
-      if (opts.mdns) {
-        UI.println(
-          UI.Style.TEXT_INFO_BOLD + "  mDNS:              ",
-          UI.Style.TEXT_NORMAL,
-          `${opts.mdnsDomain}:${server.port}`,
-        )
+        // Open localhost in browser
+        open(localhostUrl).catch(() => {})
+      } else {
+        const displayUrl = server.url.toString()
+        UI.println(UI.Style.TEXT_INFO_BOLD + "  Web interface:    ", UI.Style.TEXT_NORMAL, displayUrl)
+        open(displayUrl).catch(() => {})
       }
-
-      // Open localhost in browser
-      open(localhostUrl).catch(() => {})
-    } else {
-      const displayUrl = server.url.toString()
-      UI.println(UI.Style.TEXT_INFO_BOLD + "  Web interface:    ", UI.Style.TEXT_NORMAL, displayUrl)
-      open(displayUrl).catch(() => {})
     }
 
     yield* Effect.never

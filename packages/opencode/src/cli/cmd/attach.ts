@@ -58,6 +58,10 @@ export const AttachCommand = cmd({
       .option("replay-limit", {
         type: "number",
         describe: "cap visible mini replay to the newest N messages",
+      })
+      .option("prompt", {
+        type: "string",
+        describe: "prompt to use",
       }),
   handler: async (args) => {
     if (args.replay === true) {
@@ -114,6 +118,13 @@ export const AttachCommand = cmd({
     const headers = ServerAuth.headers({ password: args.password, username: args.username })
     const config = await TuiConfig.get()
 
+    const prompt = await (async () => {
+      const piped = process.stdin.isTTY ? undefined : await Bun.stdin.text()
+      if (!args.prompt) return piped
+      if (!piped) return args.prompt
+      return piped + "\n" + args.prompt
+    })()
+
     try {
       await validateSession({
         url: args.url,
@@ -139,6 +150,7 @@ export const AttachCommand = cmd({
           continue: args.continue,
           sessionID: args.session,
           fork: args.fork,
+          prompt,
         },
         directory,
         headers,
