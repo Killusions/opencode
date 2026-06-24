@@ -41,7 +41,7 @@ Rules:
 - Put expected errors in service method signatures.
 - Use `yield* new DomainError(...)` for direct early failures in
   `Effect.gen` / `Effect.fn`.
-- Use `Schema.Defect` for unknown cause fields when preserving the cause is
+- Use `Schema.Defect()` for unknown cause fields when preserving the cause is
   useful for logs or callers.
 - Use `Effect.try(...)`, `Effect.tryPromise(...)`, `Effect.mapError`,
   `Effect.catchTag`, and `Effect.catchTags` to translate external
