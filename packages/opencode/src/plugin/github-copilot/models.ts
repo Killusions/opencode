@@ -2,7 +2,6 @@ import type { Model } from "@opencode-ai/sdk/v2"
 import { Option, Schema } from "effect"
 
 const item = Schema.Struct({
-  model_picker_enabled: Schema.Boolean,
   id: Schema.String,
   name: Schema.String,
   // every version looks like: `{model.id}-YYYY-MM-DD`
@@ -214,7 +213,7 @@ export async function get(
   baseURL: string,
   headers: HeadersInit = {},
   existing: Record<string, Model> = {},
-): Promise<{ models: Record<string, Model>; pickerEnabled: Set<string> }> {
+): Promise<{ models: Record<string, Model> }> {
   const data = await fetch(`${baseURL}/models`, {
     headers,
     signal: AbortSignal.timeout(5_000),
@@ -249,10 +248,7 @@ export async function get(
     result[id] = build(id, m, baseURL)
   }
 
-  return {
-    models: result,
-    pickerEnabled: new Set([...remote].filter(([, item]) => item.model_picker_enabled).map(([id]) => id)),
-  }
+  return { models: result }
 }
 
 export * as CopilotModels from "./models"
